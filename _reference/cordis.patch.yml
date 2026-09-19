@@ -1,0 +1,6 @@
+- insert:
+    - id: mcp-docker
+      name: '@comecaramelos/dsh-docker-desktop-mcp'
+      config:
+        serverName: docker
+        profile: default

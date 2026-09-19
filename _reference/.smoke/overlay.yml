@@ -1,0 +1,9 @@
+# Smoke-boot overlay: load the docker-desktop-mcp plugin from the workspace
+# source. `name` is anchored beside this file by the dsh patch loader, so it
+# works from any clone: run `dsh web` from the repo root.
+- insert:
+    - id: mcp-docker
+      name: '../lib/index.js'
+      config:
+        serverName: docker
+        profile: default

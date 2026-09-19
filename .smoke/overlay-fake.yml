@@ -1,0 +1,13 @@
+# Smoke overlay using a fake npx shim so the exact bridge args after a
+# flags edit are observable via .smoke/args.log.
+# `name` anchors beside this file; `command` resolves from the dsh launch cwd
+# (repo root).
+- insert:
+    - id: mcp-chrome
+      name: '../lib/index.js'
+      config:
+        serverName: chrome
+        command: .smoke/fake-npx
+        extraFlags: ['--no-usage-statistics', '--no-performance-crux']
+        chromePath: .smoke/fake-chrome
+

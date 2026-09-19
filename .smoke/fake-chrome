@@ -1,0 +1,10 @@
+#!/bin/sh
+# Test shim: stands in for a Chrome executable when a row-config `chromePath`
+# points at it (e.g. `.smoke/fake-chrome`). Prints a version line for the
+# `--version` probe so checkChrome() has a happy path; any other invocation
+# exits 1, matching a broken executable. Keep the exec bit (mode 100755).
+if [ "$1" = "--version" ]; then
+	echo "Google Chrome 99.99.99.0"
+	exit 0
+fi
+exit 1

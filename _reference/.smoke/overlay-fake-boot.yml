@@ -1,0 +1,11 @@
+# Boot overlay: loads the plugin from the workspace source against a fake
+# docker CLI. Intended for a headless boot check against an isolated DSH_HOME
+# (the live `~/.dsh` profile patch already defines the `mcp-docker` id — use
+# `overlay-fake-env.yml` there instead).
+- insert:
+    - id: mcp-docker
+      name: '../lib/index.js'
+      config:
+        serverName: docker
+        profile: default
+        command: .smoke/fake-docker

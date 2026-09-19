@@ -1,0 +1,14 @@
+#!/bin/sh
+# Test shim: logs every invocation; answers `version` with exit 0 (the
+# gateway-readiness fallback) and `mcp profile list` with sample profiles;
+# fails everything else (like a gateway run without the profiles feature).
+echo "ARGS: $*" >> "$(dirname "$0")/args.log"
+if [ "$1" = "version" ]; then
+    printf '99.99.99\n'
+    exit 0
+fi
+if [ "$2" = "profile" ]; then
+    printf '[{"id":"alpha","name":"Alpha"},{"id":"beta","name":"Beta"}]\n'
+    exit 0
+fi
+exit 1

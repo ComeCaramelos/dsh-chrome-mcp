@@ -1,0 +1,13 @@
+#!/bin/sh
+# Test shim: stands in for `npx` when launched by the bridge row config
+# (`command: .smoke/fake-npx`).
+#
+# Logs every invocation's argv to .smoke/args.log so the exact bridge argv
+# after a flags edit is observable, then exits 1. The nested bridge keeps
+# the row alive and retries with backoff, so repeated lines in args.log are
+# the reconnect schedule — use it to verify `fiber.update` re-spawns once per
+# flags change. A happy-path browser probe is exercised separately through
+# `.smoke/fake-chrome` (row-config `chromePath`).
+# Keep the exec bit (git tracks mode 100755).
+echo "ARGS: $*" >> "$(dirname "$0")/args.log"
+exit 1

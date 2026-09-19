@@ -1,0 +1,11 @@
+# Smoke overlay using a fake docker shim so we can observe discovered profiles
+# and the exact gateway args after a profile switch.
+# `name` anchors beside this file; `command` resolves from the dsh launch cwd
+# (repo root).
+- insert:
+    - id: mcp-docker
+      name: '../lib/index.js'
+      config:
+        serverName: docker
+        profile: default
+        command: .smoke/fake-docker

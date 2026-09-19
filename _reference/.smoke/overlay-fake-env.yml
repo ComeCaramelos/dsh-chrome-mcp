@@ -1,0 +1,8 @@
+# Smoke overlay: override the profile's mcp-docker row (config replacement)
+# with the fake-docker shim so invocation args are observable.
+# `command` resolves from the dsh launch cwd (repo root).
+- id: mcp-docker
+  config:
+    serverName: docker
+    profile: default
+    command: .smoke/fake-docker
