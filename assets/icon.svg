@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 410 393"
+     fill="none"
+     role="img"
+     aria-labelledby="title">
+  <title id="title">DeepSeek Chromium</title>
+
+  <style>
+    .head { fill: #1D5CCC; }
+    .body, .core { fill: #3B8EF8; }
+    .belly { fill: #86C7FA; }
+
+    @media (prefers-color-scheme: dark) {
+      .head { fill: #427CE0; }
+      .body, .core { fill: #579FFF; }
+      .belly { fill: #9DD4FF; }
+    }
+  </style>
+
+  <defs>
+    <mask id="eye-cutout"
+          maskUnits="userSpaceOnUse"
+          x="0" y="0" width="410" height="393">
+      <rect width="410" height="393" fill="white"/>
+      <circle cx="62" cy="224" r="10.7" fill="black"/>
+    </mask>
+  </defs>
+
+  <!-- Cabeza y segmento superior -->
+  <path class="head"
+        mask="url(#eye-cutout)"
+        d="M16 231
+           C12 219 28 187 53 163
+           C82 135 116 115 147 109
+           C189 101 219 115 259 152
+           C229 154 189 158 162 168
+           C135 178 118 195 112 217
+           C106 238 112 260 125 276
+           C88 272 48 258 20 238
+           C17 236 16 234 16 231Z"/>
+
+  <!-- Cuerpo y cola -->
+  <path class="body"
+        d="M184 174
+           C211 165 239 166 260 161
+           C294 154 315 137 321 115
+           C323 108 321 107 314 105
+           C282 96 263 68 260 38
+           C259 34 260 33 264 36
+           C282 48 303 39 320 54
+           C325 57 329 61 332 65
+           C343 36 374 45 391 24
+           C393 21 395 21 395 27
+           C402 63 387 89 359 104
+           C353 107 351 109 353 117
+           C364 202 317 305 239 337
+           C222 344 204 348 188 351
+           C213 320 231 282 233 246
+           C236 211 217 184 184 174Z"/>
+
+  <!-- Segmento inferior -->
+  <path class="belly"
+        d="M19 248
+           C54 269 92 281 127 284
+           C154 302 186 300 213 277
+           C204 305 189 333 171 353
+           C104 355 41 318 19 248Z"/>
+
+  <!-- Núcleo circular -->
+  <circle class="core" cx="171" cy="235" r="49"/>
+</svg>

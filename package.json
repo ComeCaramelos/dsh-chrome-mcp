@@ -1,7 +1,15 @@
 {
   "name": "@comecaramelos/dsh-chrome-mcp",
-  "description": "DSH plugin: Chrome DevTools MCP bridge (`npx -y chrome-devtools-mcp@latest`) integration (wraps @deepseek-ai/dsh-mcp-client)",
-  "author": "Robe ComeCaramelos <hello@comecaramelos.com>",
+  "description": "DSH plugin: DSH Chrome MCP bridge (`npx -y chrome-devtools-mcp@latest`) integration (wraps @deepseek-ai/dsh-mcp-client)",
+  "author": "ComeCaramelos <hello@comecaramelos.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ComeCaramelos/dsh-chrome-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ComeCaramelos/dsh-chrome-mcp/issues"
+  },
+  "homepage": "https://github.com/ComeCaramelos/dsh-chrome-mcp#readme",
   "version": "0.0.1",
   "license": "MIT",
   "type": "module",
@@ -13,10 +21,17 @@
   },
   "files": [
     "lib",
+    "assets",
     "cordis.patch.yml"
   ],
   "scripts": {
-    "test": "node test/parse.test.mjs && node test/apply.test.mjs && node test/client.test.mjs"
+    "build": "tsc && npm run build:client",
+    "build:host": "tsc",
+    "build:client": "tsc -p src/client/tsconfig.json && node scripts/build-client.mjs",
+    "clean": "rm -rf lib",
+    "dev": "tsc --watch",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test \"test/*.test.mjs\""
   },
   "dsh": {
     "bundle": {
@@ -36,5 +51,12 @@
     "@deepseek-ai/dsh-mcp-client": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-subprocess": "^0.1.2-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.6",
+    "@types/react": "^18.3.31",
+    "esbuild": "^0.25.12",
+    "postcss": "^8.5.28",
+    "typescript": "^5.9.3"
   }
 }
