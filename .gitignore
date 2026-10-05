@@ -1,11 +1,28 @@
 # Dev
 .probe/
+_reference/
+.smoke/home*/
+
+# Chrome profile path: the **Prelaunch Windows Chrome** run keeps the browser data
+# in a Windows-native profile under LOCALAPPDATA and refreshes `<project>/.chrome`
+# as a symlink **view** of it (the same path the `--user-data-dir=.chrome` the
+# **Flags WSL** control names resolves to). The path is run-owned state — link
+# or directory — never checkout content, so the whole entry stays ignored
+# (a per-port relative `.chrome-<port>` is the same kind of local data).
+.chrome
+.chrome-*
 
 # Dependencies
 node_modules/
 
 # Build / dist
 dist/
+
+# Build output (generated from src/*.ts by `npm run build`; never hand-edit)
+lib/
+
+# npm cache (workspace-local)
+.npm-cache/
 
 # Docs
 docs/
@@ -24,7 +41,8 @@ Thumbs.db
 
 # Editor
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.swp
 *.swo
 *~

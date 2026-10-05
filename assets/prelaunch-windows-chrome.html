@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%20410%20393%22%20fill=%22none%22%20role=%22img%22%20aria-labelledby=%22title%22%3E%3Ctitle%20id=%22title%22%3EDeepSeek%20Chromium%3C/title%3E%3Cstyle%3E.head%20%7B%20fill:%20%231D5CCC;%20%7D%20.body,%20.core%20%7B%20fill:%20%233B8EF8;%20%7D%20.belly%20%7B%20fill:%20%2386C7FA;%20%7D%20%40media%20%28prefers-color-scheme:%20dark%29%20%7B%20.head%20%7B%20fill:%20%23427CE0;%20%7D%20.body,%20.core%20%7B%20fill:%20%23579FFF;%20%7D%20.belly%20%7B%20fill:%20%239DD4FF;%20%7D%20%7D%3C/style%3E%3Cdefs%3E%3Cmask%20id=%22eye-cutout%22%20maskUnits=%22userSpaceOnUse%22%20x=%220%22%20y=%220%22%20width=%22410%22%20height=%22393%22%3E%3Crect%20width=%22410%22%20height=%22393%22%20fill=%22white%22/%3E%3Ccircle%20cx=%2262%22%20cy=%22224%22%20r=%2210.7%22%20fill=%22black%22/%3E%3C/mask%3E%3C/defs%3E%3C%21--%20Cabeza%20y%20segmento%20superior%20--%3E%3Cpath%20class=%22head%22%20mask=%22url%28%23eye-cutout%29%22%20d=%22M16%20231%20C12%20219%2028%20187%2053%20163%20C82%20135%20116%20115%20147%20109%20C189%20101%20219%20115%20259%20152%20C229%20154%20189%20158%20162%20168%20C135%20178%20118%20195%20112%20217%20C106%20238%20112%20260%20125%20276%20C88%20272%2048%20258%2020%20238%20C17%20236%2016%20234%2016%20231Z%22/%3E%3C%21--%20Cuerpo%20y%20cola%20--%3E%3Cpath%20class=%22body%22%20d=%22M184%20174%20C211%20165%20239%20166%20260%20161%20C294%20154%20315%20137%20321%20115%20C323%20108%20321%20107%20314%20105%20C282%2096%20263%2068%20260%2038%20C259%2034%20260%2033%20264%2036%20C282%2048%20303%2039%20320%2054%20C325%2057%20329%2061%20332%2065%20C343%2036%20374%2045%20391%2024%20C393%2021%20395%2021%20395%2027%20C402%2063%20387%2089%20359%20104%20C353%20107%20351%20109%20353%20117%20C364%20202%20317%20305%20239%20337%20C222%20344%20204%20348%20188%20351%20C213%20320%20231%20282%20233%20246%20C236%20211%20217%20184%20184%20174Z%22/%3E%3C%21--%20Segmento%20inferior%20--%3E%3Cpath%20class=%22belly%22%20d=%22M19%20248%20C54%20269%2092%20281%20127%20284%20C154%20302%20186%20300%20213%20277%20C204%20305%20189%20333%20171%20353%20C104%20355%2041%20318%2019%20248Z%22/%3E%3C%21--%20N%C3%BAcleo%20circular%20--%3E%3Ccircle%20class=%22core%22%20cx=%22171%22%20cy=%22235%22%20r=%2249%22/%3E%3C/svg%3E" />
+        <title>DSH Chrome MCP bridge</title>
+        <style>
+            :root {
+                color-scheme: light dark;
+                --bg: #f5f6f8;
+                --card: #ffffff;
+                --ink: #1f2328;
+                --muted: #5b6572;
+                --line: #d7dbe1;
+                --accent: #2f6f4f;
+                --code: #f2f4f6;
+            }
+
+            @media (prefers-color-scheme: dark) {
+                :root {
+                    --bg: #16191d;
+                    --card: #1f2328;
+                    --ink: #e8eaed;
+                    --muted: #a8b1bd;
+                    --line: #343a41;
+                    --accent: #6fd39a;
+                    --code: #272c32;
+                }
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                margin: 0;
+                padding: 2rem 1rem;
+                background: var(--bg);
+                color: var(--ink);
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, sans-serif;
+                font-size: 15px;
+                line-height: 1.55;
+            }
+
+            main {
+                max-width: 46rem;
+                margin: 0 auto;
+                padding: 2rem;
+                background: var(--card);
+                border: 1px solid var(--line);
+                border-radius: 12px;
+            }
+
+            header {
+                display: flex;
+                align-items: flex-start;
+                gap: 1rem;
+                margin-bottom: 1.5rem;
+            }
+
+            .mark {
+                flex: none;
+                display: grid;
+                place-items: center;
+                width: 3rem;
+                height: 3rem;
+            }
+
+            .mark svg {
+                display: block;
+                width: 100%;
+                height: 100%;
+            }
+
+            h1 {
+                margin: 0 0 0.35rem;
+                font-size: 1.4rem;
+                line-height: 1.25;
+            }
+
+            h2 {
+                margin: 1.75rem 0 0.5rem;
+                font-size: 1rem;
+                letter-spacing: 0.01em;
+                text-transform: uppercase;
+                color: var(--muted);
+            }
+
+            p {
+                margin: 0 0 0.9rem;
+            }
+
+            p.lede {
+                margin: 0;
+            }
+
+            .notice {
+                margin: 1.5rem 0;
+                padding: 0.75rem 1rem;
+                border-left: 3px solid var(--accent);
+                border-radius: 0 8px 8px 0;
+                background: var(--code);
+            }
+
+            .notice:last-child {
+                margin-bottom: 0;
+            }
+
+            ul {
+                margin: 0 0 1rem;
+                padding-left: 1.15rem;
+            }
+
+            li {
+                margin-bottom: 0.4rem;
+            }
+
+            dl {
+                display: grid;
+                gap: 1rem;
+                margin: 0 0 1.5rem;
+                padding: 1rem 1.15rem;
+                background: var(--code);
+                border-radius: 8px;
+            }
+
+            dt {
+                color: var(--muted);
+                font-size: 0.85rem;
+                margin-bottom: 0.15rem;
+            }
+
+            dd {
+                margin: 0;
+                overflow-wrap: anywhere;
+            }
+
+            code {
+                padding: 0.1rem 0.3rem;
+                background: var(--code);
+                border-radius: 4px;
+                font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+                font-size: 0.88em;
+                overflow-wrap: anywhere;
+            }
+
+            dd code {
+                background: transparent;
+                padding: 0;
+            }
+
+            a {
+                color: var(--accent);
+            }
+
+            footer {
+                margin-top: 1.75rem;
+                padding-top: 1rem;
+                border-top: 1px solid var(--line);
+                color: var(--muted);
+                font-size: 0.85rem;
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <header>
+                <span class="mark" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 410 393" fill="none">
+                    <style>
+                        .head { fill: #1d5ccc; }
+                        .body, .core { fill: #3b8ef8; }
+                        .belly { fill: #86c7fa; }
+
+                        @media (prefers-color-scheme: dark) {
+                            .head { fill: #427ce0; }
+                            .body, .core { fill: #579fff; }
+                            .belly { fill: #9dd4ff; }
+                        }
+                    </style>
+                    <defs>
+                        <mask id="eye-cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="410" height="393">
+                            <rect width="410" height="393" fill="white" />
+                            <circle cx="62" cy="224" r="10.7" fill="black" />
+                        </mask>
+                    </defs>
+                    <!-- Cabeza y segmento superior -->
+                    <path class="head" mask="url(#eye-cutout)" d="M16 231
+                        C12 219 28 187 53 163
+                        C82 135 116 115 147 109
+                        C189 101 219 115 259 152
+                        C229 154 189 158 162 168
+                        C135 178 118 195 112 217
+                        C106 238 112 260 125 276
+                        C88 272 48 258 20 238
+                        C17 236 16 234 16 231Z" />
+                    <!-- Cuerpo y cola -->
+                    <path class="body" d="M184 174
+                        C211 165 239 166 260 161
+                        C294 154 315 137 321 115
+                        C323 108 321 107 314 105
+                        C282 96 263 68 260 38
+                        C259 34 260 33 264 36
+                        C282 48 303 39 320 54
+                        C325 57 329 61 332 65
+                        C343 36 374 45 391 24
+                        C393 21 395 21 395 27
+                        C402 63 387 89 359 104
+                        C353 107 351 109 353 117
+                        C364 202 317 305 239 337
+                        C222 344 204 348 188 351
+                        C213 320 231 282 233 246
+                        C236 211 217 184 184 174Z" />
+                    <!-- Segmento inferior -->
+                    <path class="belly" d="M19 248
+                        C54 269 92 281 127 284
+                        C154 302 186 300 213 277
+                        C204 305 189 333 171 353
+                        C104 355 41 318 19 248Z" />
+                    <!-- Núcleo circular -->
+                    <circle class="core" cx="171" cy="235" r="49" />
+                </svg></span>
+                <div>
+                    <h1>This Chrome window is driven by DSH</h1>
+                    <p class="lede">
+                        This Chrome window was opened by the
+                        <a href="https://github.com/ComeCaramelos/dsh-chrome-mcp"><code>@comecaramelos/dsh-chrome-mcp</code></a>
+                        plugin from DSH, to allow the connection from WSL.
+                    </p>
+                </div>
+            </header>
+
+            <p class="notice" role="note">
+                <strong>Keep this window open.</strong> It is not a browsing session you started — closing it drops the debugging
+                session, and the agent has to open a new one. The plugin never closes it: closing it is yours to do.
+            </p>
+
+            <h2>Why this window exists</h2>
+            <p>
+                A plugin running inside DSH on WSL started this browser on the Windows side so an agent can drive it over the
+                DevTools debugging protocol. The bridge cannot launch the browser itself: a Windows <code>chrome.exe</code> started
+                across the WSL interop boundary cannot carry its debugging pipes, so the only working Windows path is to open the
+                window here and have the bridge connect to it.
+            </p>
+            <p>
+                Nothing is browsed, submitted or uploaded on its own — every action comes from a tool call.
+            </p>
+
+            <h2>Session details</h2>
+            <dl>
+                <div>
+                    <dt>Connect address</dt>
+                    <dd><code>{{URL}}</code></dd>
+                </div>
+                <div>
+                    <dt>Profile directory</dt>
+                    <dd><code>{{PROFILE}}</code></dd>
+                </div>
+                <div>
+                    <dt>Plugin</dt>
+                    <dd>
+                        <a href="https://github.com/ComeCaramelos/dsh-chrome-mcp"><code>@comecaramelos/dsh-chrome-mcp</code></a>
+                    </dd>
+                </div>
+            </dl>
+            <p>
+                The profile directory is a dedicated one created for this run, not your own browser profile: no bookmarks, cookies,
+                extensions or history of yours are read by it, and nothing is written to your own profile by this run.
+            </p>
+
+            <footer>
+                Opened by <code>@comecaramelos/dsh-chrome-mcp</code> on port {{PORT}} — the plugin never closes this window, so
+                closing it is yours to do.
+            </footer>
+        </main>
+    </body>
+</html>

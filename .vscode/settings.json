@@ -1,0 +1,7 @@
+{
+  // Use the checkout's own TypeScript for the editor's language service.
+  // `@types/node` (24.x here) is written for the language service sitting in
+  // `node_modules/typescript`. Avoids `TS2591: Cannot find name …`.
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "js/ts.tsdk.promptToUseWorkspaceVersion": true
+}
