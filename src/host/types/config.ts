@@ -30,8 +30,8 @@ export type ChromeMcpConfig = {
      * stderr into a log file; "console" echoes it. The card's "Reduce log
      * output" toggle (the persisted `stderrMode`) overrides this. */
     bridgeStderr: BridgeStderrMode;
-    /** Optional absolute path for the stderr log ("" → the per-spawn
-     * `<tmpdir>/dsh-chrome-mcp-<serverName>-bridge-<pid>.log` default). */
+    /** Optional absolute path for the stderr log ("" → the private per-process
+     * directory created by `mkdtemp`, holding `<serverName>-bridge.log`). */
     bridgeStderrLog: string;
 };
 

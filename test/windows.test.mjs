@@ -225,9 +225,36 @@ assert.deepEqual(
 	["--browserUrl=http://127.0.0.1:9223"],
 	"even two stale entries fold into the one connect source"
 );
-assert.equal(browserUrlFlagPort(["--browserUrl=http://127.0.0.1:9223", "--headless"]), 9223, "the live port reads back out of the entry");
-assert.equal(browserUrlFlagPort(["--wsEndpoint=ws://x:1"]), 0, "a wsEndpoint carries no local port to re-check");
+// The live port is read through `carriesConnectionMode`, so **every** connect
+// spelling the plugin itself accepts answers the live session's port. A
+// spelling the live-port read could not see is what let a second browser slip
+// in beside a live one (audit run-1 C-2) — read them all here so the run has no
+// blind spot left to fall into.
+assert.equal(browserUrlFlagPort(["--browserUrl=http://127.0.0.1:9223", "--headless"]), 9223, "the live port reads back out of the = spelling");
+assert.equal(browserUrlFlagPort(["--browserUrl", "http://127.0.0.1:9223", "--headless"]), 9223, "the whitespace-separated two-entry spelling answers it too");
+assert.equal(browserUrlFlagPort(["--browserUrl http://127.0.0.1:9223"]), 9223, "and so does one row carrying its value after whitespace");
+assert.equal(browserUrlFlagPort(["--wsEndpoint=ws://127.0.0.1:9222/devtools"]), 9222, "a live wsEndpoint is a connect source like any other");
+assert.equal(browserUrlFlagPort(["--chromeArg=--remote-debugging-port=9222"]), 0, "Flags WSL is not a connect source");
 assert.equal(browserUrlFlagPort([]), 0, "no entry answers port 0");
+
+// Every accepted spelling collapses into the single connect source the run
+// writes, its value consumed with the flag so no bare URL survives as a stray
+// argv entry.
+assert.deepEqual(
+	withBrowserUrlFlag(["--no-usage-statistics", "--browserUrl", "http://127.0.0.1:9222"], "http://127.0.0.1:9222"),
+	["--no-usage-statistics", "--browserUrl=http://127.0.0.1:9222"],
+	"the two-entry spelling folds into one entry, its value consumed with it"
+);
+assert.deepEqual(
+	withBrowserUrlFlag(["--no-usage-statistics", "--browserUrl http://127.0.0.1:9222"], "http://127.0.0.1:9223"),
+	["--no-usage-statistics", "--browserUrl=http://127.0.0.1:9223"],
+	"one row carrying its own value is rewritten in place"
+);
+assert.deepEqual(
+	withBrowserUrlFlag(["--no-usage-statistics", "--wsEndpoint=ws://127.0.0.1:9222/devtools", "--headless"], "http://127.0.0.1:9222"),
+	["--no-usage-statistics", "--browserUrl=http://127.0.0.1:9222", "--headless"],
+	"a live wsEndpoint is replaced by the run's own address, never kept beside it"
+);
 
 // ── the run, against fake TCP + launch seams ───────────────────────────────
 // Every machine half is injected here — the TCP samples, the launch, the
@@ -387,24 +414,39 @@ const baseOptions = () => ({
 }
 
 // 5. A live connect entry re-checks instead of opening a second window (§6.5).
+// One live session, every spelling the plugin accepts: 0 launches, the live
+// port settled on, exactly one connect source surviving the merge.
 {
-	let started = 0;
-	const result = await runWindowsChromeConnect({
-		...baseOptions(),
-		landing: () => {
-			throw new Error("no window was launched, so there is no page to write");
-		},
-		currentFlags: ["--no-usage-statistics", "--browserUrl=http://127.0.0.1:9223"],
-		reachable: async (_host, port) => port === 135 || port === 9223,
-		start: async () => {
-			started += 1;
-		}
-	});
-	assert.equal(result.state, "connected", "the already-live address settles the run");
-	assert.equal(result.port, 9223, "the live port is re-adopted, not re-opened");
-	assert.equal(started, 0, "an already-connecting host launches nothing");
-	assert.equal(result.profileDir, "C:\\Users\\u\\AppData\\Local\\dsh-chrome-mcp\\.chrome-9223", "the settled profile is the one a launch would have picked for that port");
-	assert.equal(result.profileLink, "linked", "the view is refreshed against the settled profile, not only a launch");
+	for (const currentFlags of [
+		["--no-usage-statistics", "--browserUrl=http://127.0.0.1:9223"],
+		["--no-usage-statistics", "--browserUrl", "http://127.0.0.1:9223"],
+		["--no-usage-statistics", "--browserUrl http://127.0.0.1:9223"],
+		["--no-usage-statistics", "--wsEndpoint=ws://127.0.0.1:9223/devtools"]
+	]) {
+		let started = 0;
+		const result = await runWindowsChromeConnect({
+			...baseOptions(),
+			landing: () => {
+				throw new Error("no window was launched, so there is no page to write");
+			},
+			currentFlags,
+			reachable: async (_host, port) => port === 135 || port === 9223,
+			start: async () => {
+				started += 1;
+			}
+		});
+		const spelling = currentFlags.join(" ");
+		assert.equal(result.state, "connected", `the already-live address settles the run (${spelling})`);
+		assert.equal(result.port, 9223, `the live port is re-adopted, not re-opened (${spelling})`);
+		assert.equal(started, 0, `an already-connecting host launches nothing (${spelling})`);
+		assert.equal(result.profileDir, "C:\\Users\\u\\AppData\\Local\\dsh-chrome-mcp\\.chrome-9223", `the settled profile is the one a launch would have picked for that port (${spelling})`);
+		assert.equal(result.profileLink, "linked", `the view is refreshed against the settled profile, not only a launch (${spelling})`);
+		assert.equal(
+			withBrowserUrlFlag(currentFlags, result.url).filter((flag) => /^--(?:browserUrl|wsEndpoint)(?:=|(?=\s)|$)/iu.test(flag)).length,
+			1,
+			`the merged list keeps exactly one connect source (${spelling})`
+		);
+	}
 }
 
 // 6. The launch itself fails: the run answers launch-failed, nothing connects.

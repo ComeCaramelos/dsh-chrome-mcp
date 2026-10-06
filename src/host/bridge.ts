@@ -71,19 +71,56 @@ export function buildServerArgs(entry: ChromeMcpConfig, extraFlags: string[]): s
     return args;
 }
 
+/** Prefix of the private per-host directory the stderr sinks live in. */
+const PRIVATE_DIR_PREFIX = "dsh-chrome-mcp-";
+
+/** The private directory, created once per host process. Module-level so a
+ * later spawn reuses the very same directory instead of littering tmp. */
+let privateDir = "";
+
 /**
- * Default location of the bridge stderr log:
- * `<tmpdir>/dsh-chrome-mcp-<serverName>-bridge-<pid>.log`. One file per running
- * dsh instance; the wrapper truncates it on every spawn, so it always holds the
- * latest bridge session's output.
+ * Default location of the bridge stderr log: **one private directory per host
+ * process**, created exclusively (`mkdtemp`) and mode `0700`, holding one log
+ * per bridge (`<serverName>-bridge.log`). The wrapper truncates it on every
+ * spawn, so it always holds the latest bridge session's output.
+ *
+ * Nothing here is predictable: neither the directory name nor the file inside
+ * it can be planted by another local principal before the first spawn, and
+ * every redirect stays inside the private directory (`2>"$LOG"` with `$LOG`
+ * pointing at it — a plain `O_WRONLY|O_CREAT|O_TRUNC` redirect there can only
+ * create or truncate what the owner already owns).
+ *
+ * `options.tmpdir` keeps the old flat naming for tests and diagnostics, so a
+ * caller that needs a deterministic path still gets one.
  * @param serverName - the bridge server namespace.
  * @param options - tmpdir/pid overrides for tests and diagnostics.
  */
 export function bridgeStderrLogPath(serverName: unknown, options: BridgeStderrLogPathOptions = {}): string {
-    const tmp = typeof options.tmpdir === "string" && options.tmpdir !== "" ? options.tmpdir : os.tmpdir();
-    const pid = options.pid === void 0 ? process.pid : options.pid;
     const safe = typeof serverName === "string" ? serverName.replace(/[^A-Za-z0-9_-]/gu, "-") : "bridge";
-    return path.join(tmp, `dsh-chrome-mcp-${safe}-bridge-${pid}.log`);
+    if (typeof options.tmpdir === "string" && options.tmpdir !== "") {
+        const pid = options.pid === void 0 ? process.pid : options.pid;
+        return path.join(options.tmpdir, `dsh-chrome-mcp-${safe}-bridge-${pid}.log`);
+    }
+    if (privateDir === "" || !fs.existsSync(privateDir)) {
+        // (Re)create when it was never made or a tmp reaper took it away, so a
+        // spawn never redirects stderr into a path that no longer exists.
+        try {
+            privateDir = fs.mkdtempSync(path.join(os.tmpdir(), PRIVATE_DIR_PREFIX));
+        } catch {
+            // No private directory is possible (an unwritable tmp, a sandbox
+            // that denies the write): fall back to the flat name rather than
+            // failing the spawn — a logless bridge is a broken bridge.
+            const pid = options.pid === void 0 ? process.pid : options.pid;
+            return path.join(os.tmpdir(), `dsh-chrome-mcp-${safe}-bridge-${pid}.log`);
+        }
+        try {
+            fs.chmodSync(privateDir, 0o700);
+        } catch {
+            // mode bits stay whatever mkdtemp applied (already 0700); a failure
+            // here cannot widen access.
+        }
+    }
+    return path.join(privateDir, `${safe}-bridge.log`);
 }
 
 /**

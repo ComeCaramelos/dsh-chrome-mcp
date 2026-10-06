@@ -78,6 +78,25 @@ assert.equal(built.redirect, "/custom/path/b.log");
 const named = bridgeStderrLogPath("chrome-tools", { tmpdir: "/tmp", pid: 7 });
 assert.equal(named, "/tmp/dsh-chrome-mcp-chrome-tools-bridge-7.log");
 
+// Default derivation (no tmpdir override) must NOT be a predictable name in
+// the world-writable temp namespace: it lands inside a private directory
+// created exclusively for this host process (audit run-1 C-1 — a sink named
+// from `serverName` + `pid` is one symlink any local principal can plant).
+{
+	const first = bridgeStderrLogPath("chrome", {});
+	const second = bridgeStderrLogPath("chrome", {});
+	assert.equal(first, second, "the sink path is stable for the host process — no directory churn per spawn");
+	assert.equal(first.includes(`-bridge-${process.pid}.log`), false, "the path carries no pid anyone can predict");
+	const sinkDir = path.dirname(first);
+	assert.equal(sinkDir !== path.resolve(os.tmpdir()), true, "the sink lives inside a directory of its own, not in the temp root");
+	assert.equal(path.basename(sinkDir).startsWith("dsh-chrome-mcp-"), true, "the private directory carries the plugin prefix");
+	if (process.platform === "linux" || process.platform === "darwin") {
+		const dirMode = fs.statSync(sinkDir).mode & 0o777;
+		assert.equal(dirMode, 0o700, "the private directory is owner-only — nothing can be planted next to the sink");
+	}
+	if (fs.existsSync(sinkDir) && fs.readdirSync(sinkDir).length === 0) fs.rmdirSync(sinkDir);
+}
+
 // A chromePath pin (--executablePath=…) stays part of the preserved argv tail.
 built = buildBridgeSpawn({ ...target, args: [...target.args, "--executablePath=/usr/bin/google-chrome"] }, options);
 assert.deepEqual(built.args.slice(5), [...target.args, "--executablePath=/usr/bin/google-chrome"]);

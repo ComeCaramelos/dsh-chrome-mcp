@@ -141,15 +141,11 @@ in dedicated modules — the same shape as the sibling plugin
   its own — the `icon.svg` artwork rides inside it twice, as pure inline SVG:
   the `span.mark` in the page header, and the tab favicon as an encoded
   `data:image/svg+xml` link.
-- `.smoke/` — manual end-to-end fixtures (`fake-npx` + `fake-chrome` shims +
-  `--patch` overlays); `args.log` is the fake-npx invocation log (gitignored).
-- `.probe/` — throwaway probes and field-test evidence (gitignored): the WSL
-  `--executablePath` viability probe, `.probe/field-test.mjs`, a stdio
-  driver of the real `npx` bridge against native Linux Chrome, and the Windows
-  connect probes (`windows-chrome-connect-probe.mjs`: prereq-port
-  reachability discrimination + the `\\wsl.localhost` `--user-data-dir`
-  acceptance; `unc-user-data-dir-probe.mjs`, its predecessor), whose logs are
-  the §-evidence the Windows run quotes (see Testing conventions).
+- `.smoke/` — manual end-to-end fixtures: the `fake-npx` + `fake-chrome`
+  shims and their `--patch` overlays. The `fake-npx` shim records every
+  bridge spawn it sees, so the argv a run actually used stays recoverable
+  from the fixtures themselves; every log a run leaves behind is throwaway
+  local state, never checkout content.
 
 ## Hard constraints (do not break)
 
@@ -220,15 +216,14 @@ in dedicated modules — the same shape as the sibling plugin
   run keeps owning the Windows-native profile and the saved connect entry.
 - **WSL interop: Windows `chrome.exe` is NOT supported.** Setting
   `chromePath`/`--executablePath` to a `/mnt/c/...` executable was tested
-  end-to-end (`.probe/probe.mjs`, 2025-09-19) and fails:
+  end-to-end (2025-09-19) and fails:
   `chrome-devtools-mcp` connects with `pipe: true` (inherited fds 3/4), which
   the Windows-side process cannot receive across the WSL interop boundary
   (`Target.setDiscoverTargets: Target closed`); the WebSocket fallback reads
   `DevToolsActivePort` against `127.0.0.1`, unreachable across the WSL2 NAT
   bridge (`netstat` shows the port bound to the Windows loopback only). Keep
   the error surfaces generic — do **not** re-add Windows-path discovery.
-  Re-confirmed 2025-09-21 (`.probe/interop-test.mjs`, bridge 1.9.0, WSL2
-  NAT): the binary **does** execve across interop — `chrome.exe --version`
+  Re-confirmed 2025-09-21 (bridge 1.9.0, WSL2 NAT): the binary **does** execve across interop — `chrome.exe --version`
   exits 0 — but every tool call fails `Target.setDiscoverTargets: Target
   closed`. The "seems to work" trap: with a live Windows browser the check
   probe (`--version`) prints "Opening in existing browser session" and
@@ -319,8 +314,7 @@ in dedicated modules — the same shape as the sibling plugin
   `windowsChromeProjectDir` resolves the row-config `cwd`, else the **live
   session's workspace** (`ctx.get("sessions")` → a live session's `header.cwd`,
   most recently created wins), else `process.cwd()`. Two measured
-  field notes behind the shape, both from
-  `.probe/windows-chrome-connect-probe.log` 2026-10-06: the `cmd.exe /c start`
+  field notes behind the shape, both measured live 2026-10-06: the `cmd.exe /c start`
   wrapper is **not** used — under interop that wrapper's process does not exit
   while the GUI browser lives, so the launch step could never answer and the
   card sat in "launching" until the spawn timed out (a silent 30 s) while the
@@ -333,7 +327,7 @@ in dedicated modules — the same shape as the sibling plugin
   `npx` parser and does not apply to a launch the bridge is not in). Success
   writes `--browserUrl=http://127.0.0.1:<P>`
   into the **saved** flags through `withBrowserUrlFlag` — replace-by-key, the
-  one connect entry never duplicated (§ idempotency), **and the local
+  one connect entry never duplicated, **and the local
   `--user-data-dir` rows dropped**: upstream refuses `userDataDir` and
   `browserUrl` in the same argv (`Arguments userDataDir and browserUrl are
   mutually exclusive`, measured live 2026-10-04 — a saved Flags-WSL row kept
@@ -473,9 +467,12 @@ in dedicated modules — the same shape as the sibling plugin
   spawns `npx` with inherited stderr, so every startup/progress line lands on
   the dsh console. The default mode `"log"` wraps the spawn in a `sh -c`
   (`buildBridgeSpawn`) that `exec`s the logical argv positionally and redirects
-  **only stderr** to a per-spawn log file (`bridgeStderrLogPath`:
-  `<tmpdir>/dsh-chrome-mcp-<serverName>-bridge-<pid>.log`, or a non-empty
-  `bridgeStderrLog` override); stdout keeps flowing as the MCP protocol stream.
+  **only stderr** to a per-spawn log file (`bridgeStderrLogPath`: one private
+  directory per host process, created with `mkdtemp` in mode `0700` and holding
+  `<serverName>-bridge.log` — never a name predictable from `serverName` +
+  `pid`, which a second local account could plant; or a
+  non-empty `bridgeStderrLog` override); stdout keeps flowing as the MCP
+  protocol stream.
   The wrapper is transparent to the child (`exec "$GATEWAY" "$@"`). It must
   `exit 127` with a message ON stderr when the executable is absent (otherwise
   the transport reports a bare code and the reason is buried in the log). On a
@@ -658,11 +655,13 @@ in dedicated modules — the same shape as the sibling plugin
   slots and it reads its state from the wrong slot, which is why the test expands
   the tree inside `render()` and keeps `walk` purely structural.
 - Host behavior: boot the plugin from source with `.smoke/overlay.yml` under
-  an isolated `DSH_HOME` — `DSH_HOME=.smoke/home dsh web --patch
-  .smoke/overlay.yml --port 8765 --no-open` (repo root). For failure paths,
-  `.smoke/overlay-fake.yml` + `fake-npx`/`fake-chrome` booted with
-  `dsh web --patch .smoke/overlay-fake.yml --port N --no-open`;
-  watch `.smoke/args.log` for argv and the logs for captured bridge errors.
+  a throwaway `DSH_HOME` (a scratch home, never the live one) —
+  `DSH_HOME=<scratch-home> dsh web --patch .smoke/overlay.yml --port 8765
+  --no-open` (repo root). For failure paths, `.smoke/overlay-fake.yml` +
+  `fake-npx`/`fake-chrome` booted with `dsh web --patch
+  .smoke/overlay-fake.yml --port N --no-open`; the `fake-npx` shim records the
+  argv of every bridge spawn it serves, so watch that shim's argv log and the
+  host logs for the captured bridge errors.
 - Client test's vm sandbox needs `setTimeout`/`clearTimeout` (the action
   polls schedule against the browser globals).
 - **Windows Chrome run tests** (`test/windows.test.mjs`): the run is driven
@@ -672,8 +671,8 @@ in dedicated modules — the same shape as the sibling plugin
   stub carrying lazy `inject`/`effect` (registration disposes with the effect;
   the definition's `output.render` projects the one text block) — the real
   interop half (sockets, spawns, the `\\wsl.localhost` UNC) is never exercised
-  by a test, per the injection rule; field evidence lives in `.probe/`
-  instead.
+  by a test, per the injection rule; field evidence comes from the manual
+  field runs below instead.
 - **A test selection must never resolve to an executable that exists.** A probe
   runs `chromePath --version` as written, so any candidate list or selection
   that *is* present execs the real browser — under WSL that includes
@@ -690,15 +689,14 @@ in dedicated modules — the same shape as the sibling plugin
     layer answers **no** version and no error (see the probe-skip rule under
     *Executable selection*); asserting `executable not found` there would be
     wrong — it would mean a probe ran.
-- **Windows Chrome field test** (manual, documented in
-  `docs/windows-chrome-connect-button-plan.md` §7): the run's host halves are
+- **Windows Chrome field test** (manual): the run's host halves are
   faked in the unit suite by design, so a real launch is a manual step, never
   an automated one. Requirements: `networkingMode=mirrored` in
-  `%USERPROFILE%\.wslconfig` followed by `wsl --shutdown` (check with
+  `~/.wslconfig` followed by `wsl --shutdown` (check with
   `wslinfo --networking-mode` — the plugin only *reads* this answer, never
-  writes it), a WSL checkout whose Windows-side Chrome exists at
-  `C:\Program Files\Google\Chrome\Application\chrome.exe`. Boot the
-  plugin against an isolated `DSH_HOME=.smoke/home2`, open the card, click
+  writes it), a Windows-side Chrome the run can locate
+  (any install `WINDOWS_CHROME_CANDIDATES` answers for). Boot the
+  plugin against a throwaway `DSH_HOME`, open the card, click
   **Prelaunch Windows Chrome** — or call the `prelaunch_windows_chrome` tool from
   the agent — and watch the answers the run states: the Windows browser opens a
   window carrying `--remote-debugging-port=9222` with its profile at
@@ -711,34 +709,34 @@ in dedicated modules — the same shape as the sibling plugin
   what replaces the startup tab), the pill flips to `connect mode`, and the tool
   roundtrip (`new_page` → `list_pages`) drives it. The page is the part a unit run
   cannot answer (it injects `landing`), so the CDP tab list is the evidence:
-  `.probe/windows-chrome-landing-probe.mjs` drives the real run against a
-  non-default port (9240 by default, so a live 9222 session stays untouched),
-  prints every page's URL, and exits non-zero unless exactly one tab carries
-  `prelaunch-<port>.html`. Run it **outside** the agent's file sandbox: the page
+  once the run settles, read the debugging endpoint's page list — print every
+  page's URL and require exactly one tab carrying `prelaunch-<port>.html`
+  (drive the check on a non-default port, so a live 9222 session stays
+  untouched). Run it **outside** the agent's file sandbox: the page
   lands under `%LOCALAPPDATA%`, which a sandboxed host denies and the run then
   answers "" for — no page, same launch. Measured live 2026-10-04 (port 9240):
-  the run connects, the single page the debugging endpoint lists is
-  `file:///C:/Users/<user>/AppData/Local/dsh-chrome-mcp/prelaunch-9240.html`, and
-  **no** second tab rides along — so both the 9P read and the positional-URL
+  the run connects, the single page the debugging endpoint lists is the run's
+  own `prelaunch-9240.html`, read back with the Windows `file:///…` spelling,
+  and **no** second tab rides along — so both the 9P read and the positional-URL
   startup shape hold. The port-in-use path is real too: an
   answering 9222 (local *or* Windows — indistinguishable under mirrored) moves
-  the run to `.chrome-9223`. A failed click must leave the *previous* connect
-  entry untouched — launch-failed never rewrites the saved flags.
-- **Native-Chrome field test** (WSL, 2025-09): drive the real bridge with
-  `.probe/field-test.mjs` (stdio MCP over `npx -y chrome-devtools-mcp@latest
-  … --executablePath=/usr/bin/google-chrome`). On a live `dsh web` host
+  the run to the next free port of the pool. A failed click must leave the
+  *previous* connect entry untouched — launch-failed never rewrites the saved
+  flags.
+- **Native-Chrome field test** (WSL, 2025-09): drive the real bridge over stdio
+  MCP (`npx -y chrome-devtools-mcp@latest
+  … --executablePath=<the system Chrome>`). On a live `dsh web` host
   nothing extra is needed — a tool-call roundtrip passed with default flags
   (upstream discovery picked `/opt/google/chrome/chrome`). Inside the agent's
   **file sandbox** Chrome cannot launch with the same command
   (`Target.setDiscoverTargets: Target closed`: the sandbox denies
   `/dev/shm` shared-memory + `~/.config` writes, and core-dumps on the
   crashpad failure) — this is an environment artifact, **never** "fix" it by
-  demanding permission escalation. Run it sandbox-clean instead:
-  `FIELD_SANDBOX_CLEAN=1 node .probe/field-test.mjs`, which redirects
-  `HOME`/`npm_config_cache` into `.probe/home/` and `TMPDIR`/
-  `XDG_RUNTIME_DIR` into `.probe/user-data/`, and adds the bridge pass-through
-  args `--allow-unrestricted-paths` (1.9.0 otherwise sandboxes file-write
-  tools to the OS temp dir) `--chromeArg=--disable-dev-shm-usage`
+  demanding permission escalation. Run it sandbox-clean instead: redirect
+  `HOME`/`npm_config_cache` into a scratch home and `TMPDIR`/
+  `XDG_RUNTIME_DIR` into a scratch user-data dir, and add the bridge
+  pass-through args `--allow-unrestricted-paths` (1.9.0 otherwise sandboxes
+  file-write tools to the OS temp dir) `--chromeArg=--disable-dev-shm-usage`
   `--chromeArg=--no-sandbox`. `--chromeArg=<flag>` is the only way to reach
   Chrome's argv: bare `--disable-dev-shm-usage`/`--no-sandbox` hit the
   yargs parser first (`Unknown arguments`, dropped).
