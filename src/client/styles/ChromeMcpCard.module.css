@@ -242,6 +242,19 @@
     background: var(--dsw-alias-state-error-primary);
 }
 
+/* The unsaved marker beside the title while a staged edit is pending. */
+.badge {
+    color: var(--dsw-alias-label-tertiary);
+    background: var(--dsw-alias-bg-layer-1);
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 11px;
+    line-height: 16px;
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+}
+
 .empty {
     color: var(--dsw-alias-label-tertiary);
     margin: 0;
@@ -821,4 +834,69 @@
 .catalogInputMono {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
+}
+
+/* ── extensions: the staged-form footer ─────────────────────────────────── */
+
+/* The form's own save line, carried as a block inside the body the way the
+ * reference's footer sits under its fields: nothing the card edits reaches the
+ * Host until Apply. */
+.footer {
+    border-top: 0.5px solid var(--dsw-alias-border-l2);
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 0 0;
+    display: flex;
+}
+
+.footerError {
+    color: var(--dsw-alias-label-error);
+    text-align: right;
+    min-width: 0;
+    flex: 1;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* Same shape as the dialog's footer buttons: the reference footer's two-button
+ * save, with the primary carrying the save itself. */
+.footerButton {
+    border: 0.5px solid var(--dsw-alias-border-l3);
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--dsw-alias-label-secondary);
+    background: transparent;
+    padding: 5px 14px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.footerButton:hover:not(:disabled) {
+    color: var(--dsw-alias-label-primary);
+    border-color: var(--dsw-alias-label-dimmed);
+}
+
+.footerButton:disabled {
+    cursor: default;
+    opacity: 0.4;
+}
+
+.footerButton:focus-visible {
+    outline: 2px solid var(--dsw-alias-brand-primary);
+    outline-offset: 1px;
+}
+
+.footerButtonPrimary {
+    color: var(--dsw-alias-bg-layer-3);
+    font-weight: 600;
+    background: var(--dsw-alias-label-primary);
+    border-color: transparent;
+}
+
+.footerButtonPrimary:hover:not(:disabled) {
+    color: var(--dsw-alias-bg-layer-3);
+    background: var(--dsw-alias-label-secondary);
+    border-color: transparent;
 }

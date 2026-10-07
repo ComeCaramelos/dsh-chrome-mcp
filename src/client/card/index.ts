@@ -77,6 +77,10 @@ export interface ChromeMcpCardProps {
      * prereq, launch, connect — all host-side; the answer lands in
      * `windowsChromeStatus`). */
     openWindowsChrome: () => Promise<void>;
+    /** Persist every staged edit in one pass; nothing was applied until now. */
+    apply: () => Promise<void>;
+    /** Drop every staged edit, reverting the card to what the host serves. */
+    discard: () => void;
     /** One mirror re-read (used when the card opens). */
     refresh: () => Promise<void>;
 }
@@ -172,6 +176,12 @@ export function ChromeMcpCard(props: ChromeMcpCardProps) {
                                 className: STYLES.nameRow,
                                 children: [
                                     jsx("span", { className: STYLES.name, children: t("title") }),
+                                    // A card holding a staged edit announces it
+                                    // beside the title, the way the reference
+                                    // cards mark a pending save.
+                                    state.dirty
+                                        ? jsx("span", { className: STYLES.badge, children: t("unsaved") })
+                                        : null,
                                     view.dotIsError || view.missing
                                         ? jsx("span", {
                                             className: STYLES.dot + " " + STYLES.dotError,
@@ -287,7 +297,38 @@ export function ChromeMcpCard(props: ChromeMcpCardProps) {
                                 onAdd: runs.addFromDialog,
                                 onClose: runs.closeDialog
                             })
-                            : null
+                            : null,
+                        // The form writes nothing as it is edited: every staged
+                        // edit is persisted only when **Apply** lands them, and
+                        // **Discard** drops the whole draft — reverting every
+                        // staged value to what the host already serves — before
+                        // collapsing the body.
+                        jsxs("div", {
+                            className: STYLES.footer,
+                            children: [
+                                state.failed
+                                    ? jsx("p", { className: STYLES.footerError, role: "status", children: t("saveFailed") })
+                                    : null,
+                                jsx("button", {
+                                    type: "button",
+                                    className: STYLES.footerButton,
+                                    onClick: () => {
+                                        if (typeof props.discard === "function") props.discard();
+                                        setOpen(false);
+                                    },
+                                    children: t("discard")
+                                }),
+                                jsx("button", {
+                                    type: "button",
+                                    className: STYLES.footerButton + " " + STYLES.footerButtonPrimary,
+                                    disabled: !state.dirty || state.saving || !state.writable,
+                                    onClick: () => {
+                                        if (typeof props.apply === "function") void props.apply();
+                                    },
+                                    children: state.saving ? t("saving") : t("apply")
+                                })
+                            ]
+                        })
                     ]
                 })
                 : null

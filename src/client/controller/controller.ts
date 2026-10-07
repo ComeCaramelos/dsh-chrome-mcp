@@ -25,6 +25,17 @@ import { CHECK_POLL_TICK_MS, CHECK_POLL_TIMEOUT_MS } from "./budget.js";
 import { readNumber, readStatus, readString, readWindowsChromeStatus } from "./read.js";
 import type { ChromeExecutableStatus, ChromeMcpCardSnapshot, DescribeMirror, SettingsScope } from "./snapshot.js";
 
+/** A staged field key — the four editable fields the card stages. */
+type DraftKey = "extraFlags" | "executables" | "effectiveChromePath" | "stderrMode";
+
+/** Whether two flag lists carry the same strings in the same order. */
+function sameStrings(a: readonly string[], b: readonly string[]): boolean {
+    if (a === b) return true;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+}
+
 /**
  * The card's data half: store, publish-on-notify, and the write actions the
  * card's slot registration injects as props.
@@ -38,6 +49,38 @@ export class ChromeMcpCardController {
     private waitStarted = false;
     readonly store: ReturnType<typeof createSnapshotStore<ChromeMcpCardSnapshot>>;
     private readonly unsubscribe: () => void;
+    /**
+     * Staged edits that have not been applied yet. A field is staged only while
+     * it differs from what the Host serves; a draft that equals the served value
+     * is not dirty and persists nothing. The editable surface staged here is the
+     * whole form: the extra-flags list, the saved-executable rows, the selected
+     * executable (its effective path), and the "Reduce log output" mode. What is
+     * *persisted* is read below and echoed back only once a save lands it.
+     */
+    private readonly draft: {
+        extraFlags?: string[];
+        executables?: CatalogEntry[];
+        effectiveChromePath?: string;
+        stderrMode?: "" | "log" | "console";
+    } = {};
+    /** The last persisted (undrafted) projection, recomputed on every publish. */
+    private saved: {
+        extraFlags: string[];
+        executables: CatalogEntry[];
+        effectiveChromePath: string;
+        effectiveSource: string;
+        stderrMode: string;
+        stderrEffective: string;
+    } = {
+            extraFlags: [],
+            executables: [],
+            effectiveChromePath: "",
+            effectiveSource: "",
+            stderrMode: "",
+            stderrEffective: "log"
+        };
+    private saving = false;
+    private failed = false;
 
     constructor(scope: SettingsScope, mirror: DescribeMirror) {
         this.scope = scope;
@@ -62,7 +105,10 @@ export class ChromeMcpCardController {
             wslWindowsExecutable: false,
             windowsChromeStatus: { state: "off", port: 0, error: "" },
             carriesConnectionMode: false,
-            actionError: ""
+            actionError: "",
+            dirty: false,
+            saving: false,
+            failed: false
         });
         this.unsubscribe = scope.subscribe(() => this.publish());
         this.publish();
@@ -74,6 +120,10 @@ export class ChromeMcpCardController {
         const previous = this.store.getSnapshot();
         const snapshot = this.scope.getSnapshot();
         if (snapshot.status !== "ready" || snapshot.value === void 0) {
+            this.saved = {
+                extraFlags: [], executables: [], effectiveChromePath: "", effectiveSource: "",
+                stderrMode: "", stderrEffective: "log"
+            };
             this.store.set({
                 available: false,
                 writable: false,
@@ -94,7 +144,10 @@ export class ChromeMcpCardController {
                 wslWindowsExecutable: false,
                 windowsChromeStatus: { state: "off", port: 0, error: "" },
                 carriesConnectionMode: false,
-                actionError: previous.actionError
+                actionError: previous.actionError,
+                dirty: false,
+                saving: false,
+                failed: false
             });
             return;
         }
@@ -160,27 +213,68 @@ export class ChromeMcpCardController {
         // host state too: served by the base clone, like the rest.
         const servedWindowsChrome = readWindowsChromeStatus(base.windowsChromeStatus !== undefined ? base.windowsChromeStatus : value.windowsChromeStatus);
         const servedConnectMode = base.carriesConnectionMode === undefined ? value.carriesConnectionMode === true : base.carriesConnectionMode === true;
+        // The extra-flags list is the user layer (like the rows), read from
+        // `value`. It is one of the four editable fields this card stages.
+        const servedExtraFlags: string[] = Array.isArray(value.extraFlags)
+            ? value.extraFlags.filter((flag: unknown) => typeof flag === "string" && flag !== "")
+            : [];
+        // The effective "Reduce log output" mode: the persisted `stderrMode`
+        // when set, else the row-config `rowStderr`. The draft is dirty against
+        // this, so a toggle that lands back on what is already effective writes
+        // nothing.
+        const servedStderrEffective = servedStderrMode === "log" || servedStderrMode === "console"
+            ? servedStderrMode
+            : servedRowStderr === "console" ? "console" : "log";
+        // The draft overlays the four persisted fields — everything else the card
+        // renders is host state, served straight from what the Host answers. The
+        // draft wins while it is set, so the pill, the rows and the flags read
+        // what is *about to* be saved, not what is still running.
+        const extraFlagsDraft = this.draft.extraFlags !== undefined ? this.draft.extraFlags : servedExtraFlags;
+        const executablesDraft = this.draft.executables !== undefined ? this.draft.executables : servedExecutables;
+        const effectiveChromePathDraft = this.draft.effectiveChromePath !== undefined ? this.draft.effectiveChromePath : servedEffectivePath;
+        const effectiveSourceDraft = this.draft.effectiveChromePath !== undefined ? "selected" : servedSource;
+        const stderrModeDraft = this.draft.stderrMode !== undefined ? this.draft.stderrMode : servedStderrMode;
+        // Dirty is what a save would change: a staged field that differs from
+        // what is served. A draft equal to the effective value writes nothing.
+        const dirtyExtraFlags = this.draft.extraFlags !== undefined && !sameStrings(this.draft.extraFlags, servedExtraFlags);
+        const dirtyExecutables = this.draft.executables !== undefined &&
+            JSON.stringify(this.draft.executables) !== JSON.stringify(servedExecutables);
+        const dirtyPath = this.draft.effectiveChromePath !== undefined && this.draft.effectiveChromePath !== servedEffectivePath;
+        const dirtyStderr = this.draft.stderrMode !== undefined && this.draft.stderrMode !== servedStderrEffective;
+        // Keep the undrafted projection so `apply` can tell, field by field, what
+        // actually changed since the last publish.
+        this.saved = {
+            extraFlags: servedExtraFlags,
+            executables: servedExecutables,
+            effectiveChromePath: servedEffectivePath,
+            effectiveSource: servedSource,
+            stderrMode: servedStderrMode,
+            stderrEffective: servedStderrEffective
+        };
         this.store.set({
             available: true,
             writable: snapshot.writable === true,
-            extraFlags: Array.isArray(value.extraFlags) ? value.extraFlags : [],
+            extraFlags: extraFlagsDraft,
             lastError: typeof base.lastError === "string" ? base.lastError : ((value.lastError as string) ?? ""),
             chromeMissing: base.chromeMissing === undefined ? value.chromeMissing === true : base.chromeMissing === true,
             executableDiscoveryRevision: servedRevision,
             chromeVersion: servedVersion,
-            executables: servedExecutables,
+            executables: executablesDraft,
             executableStatus: servedStatus,
             chromePath: readString(value.chromePath, ""),
-            effectiveChromePath: servedEffectivePath,
-            effectiveSource: servedSource,
-            stderrMode: servedStderrMode === "log" || servedStderrMode === "console" ? servedStderrMode : "",
+            effectiveChromePath: effectiveChromePathDraft,
+            effectiveSource: effectiveSourceDraft,
+            stderrMode: stderrModeDraft === "log" || stderrModeDraft === "console" ? stderrModeDraft : "",
             rowStderr: servedRowStderr === "console" ? "console" : "log",
             defaultExtraFlags: servedDefaults,
             wslExtraFlags: servedWslFlags,
             wslWindowsExecutable: servedWslWindows,
             windowsChromeStatus: servedWindowsChrome,
             carriesConnectionMode: servedConnectMode,
-            actionError: ""
+            actionError: "",
+            dirty: dirtyExtraFlags || dirtyExecutables || dirtyPath || dirtyStderr,
+            saving: this.saving,
+            failed: this.failed
         });
         // Startup catch-up: the registration run lands in the base layer
         // *after* this first describe read, and a module plugin has no push
@@ -195,47 +289,45 @@ export class ChromeMcpCardController {
     }
 
     /**
-     * Immediate write of the user's extra flags (persisted; the host's
-     * validate hook rejects invalid lists here, and the next bridge
-     * launch starts with them).
+     * Stage the extra-flags list. Nothing is persisted until `apply`; the saved
+     * list stays what it was until a save lands it, while the card already
+     * renders the staged list so what is on screen is exactly what applying
+     * would store. A list equal to what is served is not dirty and writes
+     * nothing.
      */
     saveFlags(flags: string[]): Promise<void> {
-        return this.scope.set("extraFlags", flags).catch((error) => this.noteError(error));
+        if (this.disposed) return Promise.resolve();
+        this.draft.extraFlags = Array.isArray(flags) ? flags : [];
+        this.clearDraft("extraFlags");
+        this.publish();
+        return Promise.resolve();
     }
 
     /**
-     * Pick one saved executable. Writes the persisted `chromePath` (the host
-     * restarts the bridge connection carrying it and re-runs the discovery), then
-     * waits until the served revision advances past the click-time value.
+     * Stage the picked executable as the effective selection. Nothing restarts
+     * the bridge until `apply`; the pill already shows the staged path so the
+     * draft reads as what the bridge *would* launch with.
      */
     selectExecutable(id: string): Promise<void> {
         if (this.disposed) return Promise.resolve();
         const target = typeof id === "string" ? id.trim() : "";
         if (target === "") return Promise.resolve();
-        const baseline = this.store.getSnapshot().executableDiscoveryRevision;
-        const wait = this.waitFor("executableDiscoveryRevision", baseline, Date.now() + CHECK_POLL_TIMEOUT_MS);
-        return this.scope
-            .set("chromePath", target)
-            .catch((error) => this.noteError(error))
-            .then(() => wait);
+        this.draft.effectiveChromePath = target;
+        this.clearDraft("effectiveChromePath");
+        this.publish();
+        return Promise.resolve();
     }
 
     /**
-     * Save the whole rows list: the card owns the draft, the host re-normalizes
-     * on the way in and re-runs the scan the new ids imply.
+     * Stage the whole saved-rows list. A row typed here shows up in the dropdown
+     * options at once, but the rows on the wire stay as they were until a save.
      */
     saveExecutables(entries: CatalogEntry[]): Promise<void> {
         if (this.disposed) return Promise.resolve();
-        const rows = normalizeEntries(entries);
-        const snapshot = this.store.getSnapshot();
-        const unchanged = JSON.stringify(rows) === JSON.stringify(snapshot.executables);
-        if (unchanged) return Promise.resolve();
-        const baseline = snapshot.executableDiscoveryRevision;
-        const wait = this.waitFor("executableDiscoveryRevision", baseline, Date.now() + CHECK_POLL_TIMEOUT_MS);
-        return this.scope
-            .set("executables", rows)
-            .catch((error) => this.noteError(error))
-            .then(() => wait);
+        this.draft.executables = normalizeEntries(entries);
+        this.clearDraft("executables");
+        this.publish();
+        return Promise.resolve();
     }
 
     /**
@@ -260,28 +352,24 @@ export class ChromeMcpCardController {
     }
 
     /**
-     * Merge the ids picked in the dialog into the saved rows: every id already
-     * there keeps its place (and its name), the missing ones append nameless.
-     * The host re-normalizes on the way in and re-runs the scan the new ids
-     * imply, so the same revision counter carries the wait.
+     * Merge the ids picked in the dialog into the saved rows. The same staged
+     * whole-list write the picker's own row editor uses, so a newly picked
+     * executable appears in the dropdown without touching the persisted rows.
      */
     addExecutables(ids: string[]): Promise<void> {
         if (this.disposed) return Promise.resolve();
-        const served = this.store.getSnapshot();
-        const rows = normalizeEntries(served.executables);
-        const merged = rows.concat(
-            (Array.isArray(ids) ? ids : [])
-                .filter((id) => typeof id === "string" && id.trim() !== "")
-                .map((id) => ({ id: id.trim(), name: "" }))
+        const current = this.store.getSnapshot().executables;
+        const merged = normalizeEntries(
+            current.concat(
+                (Array.isArray(ids) ? ids : [])
+                    .filter((id) => typeof id === "string" && id.trim() !== "")
+                    .map((id) => ({ id: id.trim(), name: "" }))
+            )
         );
-        const next = normalizeEntries(merged);
-        if (JSON.stringify(next) === JSON.stringify(rows)) return Promise.resolve();
-        const baseline = served.executableDiscoveryRevision;
-        const wait = this.waitFor("executableDiscoveryRevision", baseline, Date.now() + CHECK_POLL_TIMEOUT_MS);
-        return this.scope
-            .set("executables", next)
-            .catch((error) => this.noteError(error))
-            .then(() => wait);
+        this.draft.executables = merged;
+        this.clearDraft("executables");
+        this.publish();
+        return Promise.resolve();
     }
 
     /**
@@ -289,7 +377,8 @@ export class ChromeMcpCardController {
      * trigger, then wait for the run to settle (same revision counter every
      * executable run advances). What the button ends up reporting — launched,
      * already connected, prereq missing — is served through
-     * `windowsChromeStatus`, not through the promise.
+     * `windowsChromeStatus`, not through the promise. This is an immediate host
+     * run, not a staged edit.
      */
     openWindowsChrome(): Promise<void> {
         if (this.disposed) return Promise.resolve();
@@ -302,11 +391,8 @@ export class ChromeMcpCardController {
     }
 
     /**
-     * Flip the "Reduce log output" toggle: persists `stderrMode` as "log"
-     * (capture stderr into the bridge log file) or "console" (echo it for
-     * debugging), starting from what the host currently resolves — the served
-     * `stderrMode` when set, else the row-config `rowStderr` fallback. The host
-     * restarts the bridge connection on the change.
+     * Stage the "Reduce log output" flip. The draft holds the flipped effective
+     * mode; a save restarts the bridge connection with / without the wrapper.
      */
     toggleStderr(): Promise<void> {
         if (this.disposed) return Promise.resolve();
@@ -318,7 +404,91 @@ export class ChromeMcpCardController {
                     ? "console"
                     : "log";
         const next = effective === "log" ? "console" : "log";
-        return this.scope.set("stderrMode", next).catch((error) => this.noteError(error));
+        this.draft.stderrMode = next;
+        this.clearDraft("stderrMode");
+        this.publish();
+        return Promise.resolve();
+    }
+
+    /**
+     * Write every staged edit in one pass: for each staged field that actually
+     * differs from what the Host serves, persist it, then clear that field's
+     * draft. The fields that advance the executable run (a new selection or new
+     * rows) carry the one wait the executable actions used to do. A field whose
+     * draft equals what is served is skipped; it would change nothing. A
+     * rejection is surfaced through `noteError` and the field's draft is kept, so
+     * the edit is not silently dropped — the user can retry.
+     */
+    async apply(): Promise<void> {
+        if (this.disposed || this.saving) return;
+        const saved = this.saved;
+        const writes: { key: DraftKey; field: "extraFlags" | "executables" | "chromePath" | "stderrMode"; value: unknown; needsRevision: boolean }[] = [];
+
+        if (this.draft.extraFlags !== undefined && !sameStrings(this.draft.extraFlags, saved.extraFlags)) {
+            writes.push({ key: "extraFlags", field: "extraFlags", value: this.draft.extraFlags, needsRevision: false });
+        }
+        if (this.draft.executables !== undefined && JSON.stringify(this.draft.executables) !== JSON.stringify(saved.executables)) {
+            writes.push({ key: "executables", field: "executables", value: this.draft.executables, needsRevision: true });
+        }
+        if (this.draft.effectiveChromePath !== undefined && this.draft.effectiveChromePath !== saved.effectiveChromePath) {
+            writes.push({ key: "effectiveChromePath", field: "chromePath", value: this.draft.effectiveChromePath, needsRevision: true });
+        }
+        if (this.draft.stderrMode !== undefined && this.draft.stderrMode !== saved.stderrEffective) {
+            writes.push({ key: "stderrMode", field: "stderrMode", value: this.draft.stderrMode, needsRevision: false });
+        }
+        if (writes.length === 0) return;
+
+        const baseline = this.store.getSnapshot().executableDiscoveryRevision;
+        let needsRevision = false;
+        let landed = true;
+        let failure: string = "";
+        this.saving = true;
+        this.failed = false;
+        this.publish();
+
+        for (const write of writes) {
+            try {
+                await this.scope.set(write.field, write.value);
+                needsRevision = needsRevision || write.needsRevision;
+            } catch (error) {
+                failure = error != null && typeof (error as any).message === "string" ? (error as any).message : String(error);
+                landed = false;
+                break;
+            }
+        }
+
+        this.saving = false;
+        if (landed) {
+            // Clear exactly the drafts that landed; a rejected one stays so the
+            // card keeps showing the failed edit for correction.
+            for (const write of writes) this.clearDraft(write.key, true);
+            this.failed = false;
+        } else {
+            this.failed = true;
+        }
+        this.publish();
+        // A rejected write surfaces its message through the store's own
+        // actionError line. `publish` clears that line, so re-attach what the
+        // rejection answered with — the same surface a live write used to have.
+        if (!landed && failure !== "") {
+            const current = this.store.getSnapshot();
+            this.store.set({ ...current, actionError: failure });
+        }
+
+        if (landed && needsRevision) {
+            await this.waitFor("executableDiscoveryRevision", baseline, Date.now() + CHECK_POLL_TIMEOUT_MS);
+        }
+    }
+
+    /** Drop every staged edit, re-seeding every field from what the Host serves. */
+    discard(): void {
+        if (this.disposed) return;
+        delete this.draft.extraFlags;
+        delete this.draft.executables;
+        delete this.draft.effectiveChromePath;
+        delete this.draft.stderrMode;
+        this.failed = false;
+        this.publish();
     }
 
     /** The face the card's slot registration injects. */
@@ -332,10 +502,30 @@ export class ChromeMcpCardController {
             refreshExecutables: () => this.refreshExecutables(),
             addExecutables: (ids: string[]) => this.addExecutables(ids),
             openWindowsChrome: () => this.openWindowsChrome(),
+            /** Persist every staged edit in one pass; see `apply`. */
+            apply: () => this.apply(),
+            /** Drop every staged edit; see `discard`. */
+            discard: () => this.discard(),
             /** One mirror re-read (used when the card opens). */
             refresh: () => this.refresh()
         };
     }
+
+    /** Clear a staged field once it equals the served value, so it stops being
+     * dirty. When a save landed a field the draft must clear regardless. */
+    private clearDraft(field: DraftKey, force = false): void {
+        if (force) {
+            delete this.draft[field];
+            return;
+        }
+        const value = this.draft[field] as unknown;
+        if (value === undefined) return;
+        if (field === "extraFlags" && sameStrings(value as string[], this.saved.extraFlags)) delete this.draft.extraFlags;
+        else if (field === "executables" && JSON.stringify(value) === JSON.stringify(this.saved.executables)) delete this.draft.executables;
+        else if (field === "effectiveChromePath" && value === this.saved.effectiveChromePath) delete this.draft.effectiveChromePath;
+        else if (field === "stderrMode" && value === this.saved.stderrEffective) delete this.draft.stderrMode;
+    }
+
 
     /**
      * Re-read the shared describe mirror once so base-layer status

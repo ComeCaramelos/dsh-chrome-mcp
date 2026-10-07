@@ -213,7 +213,8 @@ const ctx = {
 				"probing", "versionLabel", "probeJustNow", "probeSecondsAgo", "probeMinutesAgo",
 				"probeHoursAgo",
 				"reduceLabel", "reduceTitle", "reduceHint", "docsMessage", "docsLinkLabel",
-				"statusError", "statusOk", "chromeMissing", "readOnly", "expand", "collapse"
+				"statusError", "statusOk", "chromeMissing", "readOnly", "expand", "collapse",
+				"apply", "discard", "saving", "unsaved", "saveFailed"
 			];
 			for (var i = 0; i < required.length; i++) {
 				assert.ok(required[i] in dicts.en, "en has key: " + required[i]);
@@ -969,27 +970,139 @@ Object.assign(storeState, { chromeMissing: false });
 tree = render(storeState);
 assert.equal(findDot(tree), undefined, "healthy again once the known flag clears");
 
-// ── controller write path (rejected save → actionError) ───────────────────
+// ── the staged form: nothing applies until Apply; the footer carries it ─────
+// The form writes nothing as it is edited: every editable field stages until an
+// Apply lands it, and the footer marks the pending state. The footer's Discard
+// drops the whole draft (reverting every staged value) and then closes the body.
+Object.assign(storeState, { writable: true, dirty: false, saving: false, failed: false });
+writes.length = 0;
+tree = render(storeState);
+let footer = walk(tree).find(isNode("div", CLS("footer")));
+assert.ok(footer, "the staged form's footer renders inside the body");
+const findApply = (t) =>
+	walk(t).find((n) => n.type === "button" && String(n.props?.className ?? "").includes(CLS("footerButtonPrimary")));
+const findDiscard = (t) =>
+	walk(t).find((n) =>
+		n.type === "button" &&
+		String(n.props?.className ?? "").includes(CLS("footerButton")) &&
+		!String(n.props?.className ?? "").includes(CLS("footerButtonPrimary")));
+assert.equal(findBadge(tree), undefined, "no unsaved badge while nothing is staged");
+let applyBtn = findApply(tree);
+assert.ok(applyBtn, "the footer carries an Apply button");
+assert.equal(applyBtn.props.disabled, true, "Apply is inert while nothing is staged");
+let discardBtn = findDiscard(tree);
+assert.ok(discardBtn, "the footer carries a Discard button");
+assert.equal(discardBtn.props.children, "discard", "the secondary action is the localisation of Discard");
+assert.equal(applyBtn.props.children, "apply", "the primary action is the localisation of Apply");
+
+// A staged edit marks the card: the unsaved badge shows beside the title and
+// Apply becomes live.
+Object.assign(storeState, { dirty: true });
+tree = render(storeState);
+assert.ok(findBadge(tree), "the unsaved badge appears beside the title while an edit is staged");
+assert.equal(findBadge(tree).props.children, "unsaved", "the badge copy reads unsaved");
+assert.equal(findApply(tree).props.disabled, false, "Apply goes live with a staged edit");
+// Saving: the primary reads the busy label while a save is in flight.
+Object.assign(storeState, { saving: true });
+tree = render(storeState);
+assert.equal(findApply(tree).props.disabled, true, "Apply stays inert while a save is in flight");
+assert.equal(findApply(tree).props.children, "saving", "the primary reads the saving copy mid-save");
+// A rejected save adds the footer's own failure line.
+Object.assign(storeState, { saving: false, failed: true });
+tree = render(storeState);
+const footerError = walk(tree).find(isNode("p", CLS("footerError")));
+assert.ok(footerError, "a rejected save reads as the footer's own failure line");
+assert.equal(footerError.props.children, "saveFailed", "the failure line copy is localizable");
+Object.assign(storeState, { failed: false });
+
+// Discard drops the staged draft and collapses the body — it persists nothing,
+// so nothing on the wire changed; the controller-level test below proves the
+// draft is reverted.
+Object.assign(storeState, { dirty: true });
+tree = render(storeState);
+findDiscard(tree).props.onClick();
+tree = render(storeState);
+assert.equal(walk(tree).find(isNode("div", CLS("body"))), undefined, "Discard hides the body (collapse)");
+assert.equal(
+	walk(tree).find(isNode("button", CLS("header"))).props["aria-expanded"],
+	false,
+	"Discard leaves the card collapsed"
+);
+assert.equal(writes.length, 0, "Discard persisted nothing");
+// Re-open so the rest of the suite renders the body again.
+walk(render(storeState)).find(isNode("button", CLS("header"))).props.onClick();
+tree = render(storeState);
+Object.assign(storeState, { dirty: false });
+
+// ── controller staging: nothing persists until apply; a save lands every draft
+// ───────────────────────────────────────────────────────────────────────────
 const face = options.inject();
 assert.equal(JSON.stringify(face.hooks.chromeMcpCard.getSnapshot()), JSON.stringify(storeState),
 	"controller inject returns same snapshot store");
-rejectNextFlagsWrite = true;
+
+// A staged edit writes nothing: it only marks the card dirty and reads as the
+// draft (the flag rows on screen show it) — the persisted list is untouched.
+const servedFlags = scopeSnapshot.value.extraFlags;
+writes.length = 0;
 await face.saveFlags(["--headless"]);
 tree = render(storeState);
+assert.equal(findDot(tree), undefined, "staging a flags edit raises no error surface");
+assert.equal(writes.length, 0, "a staged flags edit persists nothing");
+assert.equal(storeState.dirty, true, "a staged flags edit marks the card dirty");
+assert.equal(storeState.failed, false, "nothing has failed yet");
+assert.equal(storeState.saving, false, "no save in flight while only staged");
+
+// Applying lands it; a rejection surfaces on the same surface a live write had.
+rejectNextFlagsWrite = true;
+await face.apply();
+tree = render(storeState);
 dot = findDot(tree);
-assert.ok(dot, "rejected flags write raises the status dot");
+assert.ok(dot, "a rejected save raises the status dot");
 assert.equal(dot.props["aria-label"], "statusError");
 assert.equal(dot.props.title, "write rejected by host", "dot title carries the rejection message");
 const actionLine = walk(tree).find(isNode("p", CLS("error")));
-assert.ok(actionLine, "a rejected write also reads as a body paragraph");
+assert.ok(actionLine, "a rejected save also reads as a body paragraph");
 assert.equal(actionLine.props.children, "write rejected by host", "the paragraph carries the rejection message");
-// restore: a successful save clears actionError → healthy → dot hidden
-await face.saveFlags(["--isolated"]);
+assert.equal(storeState.dirty, true, "the failed draft survives a rejected save for correction");
+assert.equal(storeState.failed, true, "the card reports the save was not accepted");
+// The rejected field is never written.
+assert.equal(writes.length, 0, "a rejected write persists nothing");
+// Restore: retrying the apply lands the same draft → healthy → dot hidden, no
+// longer dirty, the flag rows read what the wire now carries.
+await face.apply();
 tree = render(storeState);
-assert.equal(findDot(tree), undefined, "dot hidden again after successful save");
-assert.ok(writes.some(([f, v]) => f === "extraFlags" && JSON.stringify(v) === JSON.stringify(["--isolated"])),
-	"saveFlags wrote the flags list");
-Object.assign(storeState, { extraFlags: ["--no-usage-statistics", "--no-performance-crux"] });
+assert.equal(findDot(tree), undefined, "dot hidden again after a successful save");
+assert.equal(storeState.dirty, false, "a landed draft is no longer dirty");
+assert.equal(storeState.failed, false, "the rejection clears once the save lands");
+assert.ok(writes.some(([f, v]) => f === "extraFlags" && JSON.stringify(v) === JSON.stringify(["--headless"])),
+	"apply wrote the staged flags list");
+Object.assign(storeState, { extraFlags: servedFlags });
+
+// ── discarding a staged edit reverts it; nothing was ever written ──────────
+// The card's Discard drops the draft; the served field reappears untouched and
+// the dirty mark clears. No field reaches the wire, because only `apply` writes.
+scopeSnapshot.value = { ...scopeSnapshot.value, extraFlags: ["--served-flag"] };
+scopeSnapshot.base = { ...scopeSnapshot.value };
+listeners.forEach((fn) => fn());
+writes.length = 0;
+await face.saveFlags(["--staged-only"]);
+tree = render(storeState);
+assert.equal(storeState.dirty, true, "a staged flags edit is dirty before it is discarded");
+assert.equal(storeState.failed, false, "nothing failed while the edit was only staged");
+assert.equal(
+	JSON.stringify(storeState.extraFlags) === JSON.stringify(["--staged-only"]),
+	true,
+	"the flag rows read the staged value while it is staged"
+);
+face.discard();
+tree = render(storeState);
+assert.equal(storeState.dirty, false, "discarding the draft clears the dirty state");
+assert.equal(
+	JSON.stringify(storeState.extraFlags) === JSON.stringify(["--served-flag"]),
+	true,
+	"discarding reverts the flag rows to what the host already serves"
+);
+assert.equal(writes.length, 0, "discarding writes nothing — only apply persists");
 
 // ── the Restore-defaults control: append what is missing, keep everything ──
 // The card keeps the whole current list (a line the user typed, or any saved
@@ -1180,47 +1293,108 @@ listeners.forEach((fn) => fn());
 await searchPromise;
 assert.equal(storeState.executableDiscoveryRevision, 1, "the card store picked up the advanced run revision");
 
-// Saving rows normalizes them (trimmed, deduped, capped) before the write.
+// Staging saved rows normalizes them (trimmed, deduped, capped) into the draft,
+// but writes nothing until applied; only `apply` lands the list on the wire.
+scopeSnapshot.value = { ...scopeSnapshot.value, executables: [] };
+listeners.forEach((fn) => fn());
 writes.length = 0;
-const rowsPromise = face.saveExecutables([
+await face.saveExecutables([
 	{ id: "  /opt/chrome  ", name: "  local  " },
 	{ id: "/opt/chrome", name: "a duplicate id drops" },
 	{ id: "", name: "no path drops" },
 	null
 ]);
+assert.equal(writes.length, 0, "staging rows writes nothing yet");
+assert.equal(storeState.dirty, true, "a staged rows edit marks the card dirty");
 assert.equal(
-	JSON.stringify(writes.at(-1)?.[1] ?? []),
-	JSON.stringify([{ id: "/opt/chrome", name: "local" }]),
-	"rows are normalized on the way out"
+	JSON.stringify(storeState.executables) === JSON.stringify([{ id: "/opt/chrome", name: "local" }]),
+	true,
+	"the draft reads normalized on screen"
 );
-scopeSnapshot.value = { ...scopeSnapshot.value, executables: [{ id: "/opt/chrome", name: "local" }] };
+// Applying persists the normalized list and waits on the run revision it bumps.
+const rowsPromise = face.apply();
+assert.ok(
+	writes.some(([f, v]) => f === "executables" && JSON.stringify(v) === JSON.stringify([{ id: "/opt/chrome", name: "local" }])),
+	"apply writes the normalized rows list"
+);
+scopeSnapshot.value = { ...scopeSnapshot.value, executables: [{ id: "/opt/chrome", name: "local" }], executableDiscoveryRevision: 2 };
+scopeSnapshot.base = { ...scopeSnapshot.value, executableDiscoveryRevision: 2 };
 listeners.forEach((fn) => fn());
 await rowsPromise;
+assert.equal(storeState.executableDiscoveryRevision, 2, "a rows save settles on the run revision");
+assert.equal(storeState.dirty, false, "a landed rows draft is no longer dirty");
 
-// Selecting a row writes the selection and waits on the same revision the
-// host's run advances behind it.
+// Staging a selection is the same shape: the pill shows the staged path without
+// touching the wire; applying writes chromePath and waits the run revision.
+scopeSnapshot.value = { ...scopeSnapshot.value, chromePath: "", effectiveChromePath: "", effectiveSource: "" };
+scopeSnapshot.base = { ...scopeSnapshot.value, effectiveChromePath: "", effectiveSource: "" };
+listeners.forEach((fn) => fn());
 writes.length = 0;
-const selectPromise = face.selectExecutable("/usr/bin/google-chrome");
-assert.ok(writes.some(([f, v]) => f === "chromePath" && v === "/usr/bin/google-chrome"), "selecting writes chromePath");
-scopeSnapshot.value = { ...scopeSnapshot.value, executableDiscoveryRevision: 2 };
+await face.selectExecutable("/usr/bin/google-chrome");
+assert.equal(writes.length, 0, "staging a selection writes nothing yet");
+assert.equal(storeState.effectiveChromePath, "/usr/bin/google-chrome", "the pill shows the staged selection");
+assert.equal(storeState.dirty, true, "a staged selection marks the card dirty");
+const selectPromise = face.apply();
+assert.ok(writes.some(([f, v]) => f === "chromePath" && v === "/usr/bin/google-chrome"), "apply writes chromePath");
+scopeSnapshot.value = { ...scopeSnapshot.value, chromePath: "/usr/bin/google-chrome", executableDiscoveryRevision: 3 };
 scopeSnapshot.base = {
 	...scopeSnapshot.value,
-	executableDiscoveryRevision: 2,
+	executableDiscoveryRevision: 3,
 	effectiveChromePath: "/usr/bin/google-chrome",
 	effectiveSource: "selected"
 };
 listeners.forEach((fn) => fn());
 await selectPromise;
-assert.equal(storeState.executableDiscoveryRevision, 2, "the selection change settled on the run revision");
+assert.equal(storeState.executableDiscoveryRevision, 3, "the selection change settled on the run revision");
 assert.equal(storeState.effectiveChromePath, "/usr/bin/google-chrome", "the pill follows what the host resolved");
+assert.equal(storeState.dirty, false, "a landed selection draft is no longer dirty");
 // Selecting nothing is not an action.
 writes.length = 0;
 await face.selectExecutable("   ");
 assert.equal(writes.length, 0, "an empty selection is a no-op");
-// Saving what is already saved is not an action either.
+// Re-saving what is already there stages nothing — it is not dirty.
 writes.length = 0;
 await face.saveExecutables(storeState.executables);
-assert.equal(writes.length, 0, "re-saving identical rows is a no-op");
+assert.equal(writes.length, 0, "re-saving identical rows stages nothing");
+assert.equal(storeState.dirty, false, "identical rows leave the card clean");
+
+// ── adding a discovered executable stages into the dropdown ───────────────
+// Picking candidates in the fetch dialog merges them into the saved rows as a
+// staged write: the new executable shows up in the dropdown's option list right
+// away, but the persisted rows are untouched until the edit is applied.
+scopeSnapshot.value = { ...scopeSnapshot.value, executables: [{ id: "/usr/bin/google-chrome", name: "system" }] };
+scopeSnapshot.base = { ...scopeSnapshot.value };
+listeners.forEach((fn) => fn());
+writes.length = 0;
+await face.addExecutables(["/opt/firefox", "/nonexistent-dir/edge"]);
+assert.equal(writes.length, 0, "adding executables stages the merge without applying");
+assert.equal(storeState.dirty, true, "a merged-in executable marks the card dirty");
+{
+	const ids = storeState.executables.map((entry) => entry.id);
+	assert.equal(ids.includes("/opt/firefox"), true, "the merged id reads in the rows list");
+	assert.equal(ids.includes("/nonexistent-dir/edge"), true, "every merged id reads in the rows list");
+	render(storeState);
+	const addMenu = menuProps.at(-1);
+	assert.ok(addMenu, "the dropdown primitive received its list");
+	const optionIds = addMenu.items.map((item) => item.id);
+	assert.equal(
+		optionIds.includes("/opt/firefox"),
+		true,
+		"a staged executable is already offered in the dropdown's options"
+	);
+}
+// Apply lands the merged rows and rides the executable run's revision.
+const addPromise = face.apply();
+assert.ok(
+	writes.some(([f, v]) => f === "executables" && v.some((entry) => entry.id === "/opt/firefox")),
+	"apply persists the merged rows"
+);
+const addLanded = storeState.executables.some((entry) => entry.id === "/opt/firefox");
+scopeSnapshot.value = { ...scopeSnapshot.value, executables: storeState.executables, executableDiscoveryRevision: 5 };
+scopeSnapshot.base = { ...scopeSnapshot.value, executableDiscoveryRevision: 5 };
+listeners.forEach((fn) => fn());
+await addPromise;
+assert.equal(storeState.dirty, false, "a landed executable merge is no longer dirty");
 
 // ── describe base layer: where the status rides ───────────────────────────
 // The host holds check/connection status in the composition base layer, which

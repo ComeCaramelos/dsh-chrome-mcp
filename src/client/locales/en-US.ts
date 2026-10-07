@@ -13,7 +13,7 @@ export const en = {
     title: "DSH Chrome MCP",
     description: "DSH Chrome MCP server (chrome-devtools-mcp) settings and status",
     executableLabel: "Chrome executable",
-    executableHint: "The saved executable the bridge launches with. Selecting one restarts the connection.",
+    executableHint: "The saved executable the bridge launches with. Applying a different one restarts the connection.",
     executableNone: "No Chrome executable detected",
     executableRows: "Saved executables",
     executableIdLabel: "Executable path",
@@ -45,7 +45,7 @@ export const en = {
     probeMinutesAgo: "minutes ago",
     probeHoursAgo: "hours ago",
     flagsTitle: "Extra flags",
-    flagsHint: "The extra flags the bridge launches with. One flag per row — saving restarts the connection.",
+    flagsHint: "The extra flags the bridge launches with. One flag per row — applying them restarts the connection.",
     flagsEmpty: "No extra flags saved. Add one by hand, or use “Restore defaults”.",
     flagsRows: "Saved flags",
     flagsValueLabel: "Extra flag",
@@ -68,6 +68,14 @@ export const en = {
     reduceLabel: "Reduce log output",
     reduceTitle: "Capture the bridge's stderr into the plugin's log file",
     reduceHint: "Captures stderr into the plugin's log file. Turn it off to debug the raw bridge output; switching restarts the bridge connection.",
+    // The staged form's own copy: nothing is written until **Apply** lands every
+    // staged edit, so the card announces what a save would store and what it
+    // could not land.
+    apply: "Apply",
+    discard: "Discard",
+    saving: "Applying…",
+    unsaved: "Unsaved",
+    saveFailed: "The last save was not accepted.",
     docsMessage: "Find the complete list of server parameters (e.g., --headless, --isolated, --slim) and how to configure WebSocket connections in the Configuration Guide.",
     docsLinkLabel: "Configuration Guide",
     statusError: "Error",

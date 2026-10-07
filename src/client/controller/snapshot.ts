@@ -107,4 +107,12 @@ export interface ChromeMcpCardSnapshot {
      * "connect mode" instead of the local selection then. */
     carriesConnectionMode: boolean;
     actionError: string;
+    /** True when a staged edit has not been applied yet. The editable fields
+     * (`extraFlags`, `executables`, the effective selection, `stderrMode`)
+     * carry the draft, not the persisted value, while this is true. */
+    dirty: boolean;
+    /** True while an apply is crossing the wire. */
+    saving: boolean;
+    /** True after a save the Host did not accept. */
+    failed: boolean;
 }

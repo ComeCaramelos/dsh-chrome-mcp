@@ -71,9 +71,22 @@ in dedicated modules — the same shape as the sibling plugin
    `inject`, the poll budgets), `apply.ts` (mount: injects the
    stylesheet via `styles/index.js`, registers locales, controller, card
    slot), `controller/` (card
-   snapshot store + write actions + the executable-run revision poll — split into
-   `controller.ts` (the class) + `snapshot.ts`/`read.ts`/`budget.ts`, re-exported by
-   `index.ts`),
+   snapshot store + staged write actions + the executable-run revision poll — split
+   into `controller.ts` (the class) + `snapshot.ts`/`read.ts`/`budget.ts`, re-exported
+   by `index.ts`). The controller is a **staged form**, not a live writer: every
+   editable field stages into a local draft and reaches the Host **only** through
+   `apply()`, which persists the fields that differ from what is served and clears
+   exactly those drafts (the executable run's revision wait rides the apply when a
+   new selection or new rows landed). A draft equal to the served value is not dirty
+   and writes nothing. The draft overlays the served snapshot on every `publish`, so
+   the pill, the saved rows and the flag rows read the staged value while the card is
+   dirty (`snapshot.ts` carries `dirty` / `saving` / `failed`). `discard()` drops the
+   whole draft; the card's **Discard** calls exactly that `discard()` — it drops every
+   staged edit, reverting the pill/rows/flags/toggle to what the host serves, and then
+   collapses the body (the reference disclosure's hide gesture). A discarded edit never
+   reached the Host, so re-opening reads the served values back. The host-run triggers
+   (`refreshExecutables`/Fetch, `openWindowsChrome`/Prelaunch) stay immediate host
+   runs — they write their nonce and poll the revision counter, never a staged field.
    `catalog.ts` (the client mirror of the saved executable rows: id/name rules,
    normalize, label — pinned against the host module's rules by the same
    fixtures `test/parse.test.mjs` uses), `card/` (the widget, split the way the
@@ -91,8 +104,8 @@ in dedicated modules — the same shape as the sibling plugin
    disclosure, the fetch action); `rows.ts` the one row list both catalogs
    render — a bordered box carrying its field(s) and the delete control, the
    empty line and the add control, with the reference card's `editing` map read
-   as a local draft overlay: typing does not persist, a blur/Enter commits the
-   whole list, a delete persists on the spot, an added blank row stays local
+   as a local draft overlay: typing does not persist, a blur/Enter stages the
+   whole list, a delete stages the list without it, an added blank row stays local
    until it carries a value, and a host push replaces an idle draft;
    `dialog.ts` the dialog the fetch action opens; `flags.ts` the extra-flags
    block — the very same rows read through the single field a flag carries
@@ -565,8 +578,9 @@ in dedicated modules — the same shape as the sibling plugin
   user clicks settles the catch-up poll instead of starting a second one.
 - The flags block renders the same rows list as the executable block (`./rows.ts`),
   read through the single field a flag is: the served list is `state.extraFlags`
-  mapped one field per row, a blur/Enter commits the whole list through
-  `controller.saveFlags(flags)` → `scope.set`, a delete persists on the spot, and
+  mapped one field per row, a blur/Enter **stages** the whole list through
+  `controller.saveFlags(flags)` (`apply()` persists only what differs — nothing
+  lands until **Apply**), and
   **Add flag** appends a local blank row. The write side drops a row left blank
   (the host rejects an empty entry) and folds a repeated flag to its first row —
   exactly what the saved executable rows do with a repeated id. **Restore
@@ -598,7 +612,8 @@ in dedicated modules — the same shape as the sibling plugin
   `windowsChromeNotWsl`, `windowsChromeNotFound`, `windowsChromeUnreachable`,
   `connectModeLabel`, `connectModeHint`,
   `reduceLabel`, `reduceTitle`, `reduceHint`, `docsMessage`, `docsLinkLabel`,
-  `statusError`, `statusOk`, `chromeMissing`, `readOnly`, `expand`, `collapse`.
+  `statusError`, `statusOk`, `chromeMissing`, `readOnly`, `expand`, `collapse`, `apply`,
+  `discard`, `saving`, `unsaved`, `saveFailed`.
   No key names an automatic mode — there is none, and no key names a source tag:
   what the pill and the rows show is the saved **name**, falling back to the
   path. The picker's copy is the `executableLabel`/`executableHint` pair, the
