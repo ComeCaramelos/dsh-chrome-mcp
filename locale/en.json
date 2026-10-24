@@ -1,0 +1,6 @@
+{
+    "meta": {
+        "title": "Chrome MCP",
+        "description": "Drives chrome-devtools-mcp — a local Chrome browser or the Windows-side Chrome through WSL — as an MCP connection, with the executable picker on top of it."
+    }
+}

@@ -12,7 +12,7 @@
 /// <reference path="../shell-modules.d.ts" />
 import * as react from "react";
 
-import type { ChromeExecutableStatus } from "../controller/index.js";
+import type { ChromeExecutableStatus } from "../types.js";
 
 /** How often the probe result line re-reads its clock to age the "ago" suffix. */
 export const PROBED_AGE_TICK_MS = 10000;
@@ -42,7 +42,7 @@ export type RunActions = {
     closeDialog: () => void;
     /** When the last fetch settled, for the result line's age suffix. */
     lastProbedAt: number;
-    /** The card's local clock, ticked while open so the age stays honest. */
+    /** The card's local clock, ticked while it is mounted so the age stays honest. */
     clock: number;
 };
 
@@ -69,7 +69,7 @@ export function useRunActions(deps: {
     const setDialog = dialogRef[1];
     // The probe's freshness clock: a run is only visible when the answer
     // differs, so the line ages the last run the card itself ran; the effect
-    // keeps the age honest while the card stays open.
+    // keeps the age honest for as long as the block is mounted.
     const probedState = react.useState(0);
     const lastProbedAt = probedState[0];
     const setLastProbedAt = probedState[1];
@@ -105,10 +105,11 @@ export function useRunActions(deps: {
                 // The dialog's rows: the whole run's answer list, so every path
                 // the machine carries reads with its answer, not only the saved
                 // ones. A path the run could not launch keeps its place carrying
-                // the failure line.
+                // the failure line; a path this host offers without probing it
+                // carries the note that names the run that drives it.
                 const candidates = statuses.map((status) => ({
                     id: status.path,
-                    note: status.version !== "" ? status.version : status.error,
+                    note: status.version !== "" ? status.version : (status.error !== "" ? status.error : status.note),
                     broken: status.version === "" && status.error !== ""
                 }));
                 setDialog({ candidates });

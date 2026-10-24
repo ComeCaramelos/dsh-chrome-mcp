@@ -1,6 +1,6 @@
 {
   "name": "@comecaramelos/dsh-chrome-mcp",
-  "description": "DSH plugin: DSH Chrome MCP bridge (`npx -y chrome-devtools-mcp@latest`) integration (wraps @deepseek-ai/dsh-mcp-client)",
+  "description": "Chrome MCP connection kinds for the dsh-mcp-manager bundle",
   "author": "ComeCaramelos <hello@comecaramelos.com>",
   "repository": {
     "type": "git",
@@ -14,49 +14,70 @@
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
+  "icon": "assets/icon.svg",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "assets",
-    "cordis.patch.yml"
+    "locale/*.json"
   ],
   "scripts": {
     "build": "tsc && npm run build:client",
     "build:host": "tsc",
     "build:client": "tsc -p src/client/tsconfig.json && node scripts/build-client.mjs",
-    "clean": "rm -rf lib",
+    "clean": "node -e \"require('node:fs').rmSync('lib', { recursive: true, force: true })\"",
     "dev": "tsc --watch",
     "prepack": "npm run build",
     "test": "npm run build && node --test \"test/*.test.mjs\""
   },
   "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
     "client": {
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
       ]
     }
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-launch-environment": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-mcp-client": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-subprocess": "^0.1.2-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.2"
+    "@comecaramelos/dsh-ancesters": "^0.0.1",
+    "@deepseek-ai/dsh-launch-environment": "^0.2.0-0",
+    "@deepseek-ai/dsh-subprocess": "^0.2.0-0",
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "chrome-devtools-mcp": "1.9.0"
   },
   "devDependencies": {
+    "@comecaramelos/dsh-mcp-manager": "^0.0.1",
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-mcp-client": "^0.2.0-0",
+    "@modelcontextprotocol/client": "2.3.1",
     "@types/node": "^24.13.6",
-    "@types/react": "^18.3.31",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "esbuild": "^0.25.12",
     "postcss": "^8.5.28",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "dsh": "^0.2.0-0"
+  },
+  "peerDependencies": {
+    "@comecaramelos/dsh-mcp-manager": "*",
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-mcp-client": "^0.2.0-0"
+  },
+  "overrides": {
+    "@modelcontextprotocol/client": "$@modelcontextprotocol/client"
+  },
+  "allowScripts": {
+    "esbuild": true
   }
 }

@@ -1,109 +1,34 @@
 /*
- * The card's stylesheet — authored as a CSS Module, the same form every
+ * The plugin's own stylesheet — authored as a CSS Module, the same form every
  * shipped `dsh-client-ui-*` half carries. The build step
  * (scripts/build-client.mjs) validates it with postcss, minifies it through
  * esbuild's CSS pipeline, and scopes every class name to `<hash>_<local>`;
  * the card imports the map (default export) keyed by the local names below.
  *
- * All tokens come from the shell's design aliases, so the card re-themes with
- * the GUI instead of shipping a palette of its own.
+ * All tokens come from the shell's design aliases, so what renders re-themes
+ * with the GUI instead of shipping a palette of its own.
  *
- * The shared half of this sheet is kept **byte-for-byte identical to the
- * sibling card's** (`dsh-docker-desktop-mcp`'s `DockerMcpCard.module.css`): the
- * card shell, the two-row field, the filled 36px selector pill, the
- * disclosure, the row boxes, the icon/link/add buttons and the fetch dialog all
- * carry the same rules in the same order, so the two cards read as one
- * component set. What belongs to this plugin only ever appears in the marked
- * extension block at the end, and only where the reference carries no
- * equivalent (the docs link, the flags editor, the probe result line and the
+ * Since dsh 0.2.0 the configuration lives on the **row** and the Plugins page
+ * renders it inside its own detail section: the page draws the crumb, the icon,
+ * the row title and its description, and wraps the entry's `view: "page"` in a
+ * section of its own. There is therefore no card shell of ours any more — no
+ * bordered card, no disclosure header and no chevron — only what the form
+ * itself is built out of: the two-row field, the filled 36px selector pill, the
+ * disclosure, the row boxes, the icon/link/add buttons and the fetch dialog.
+ * What belongs to this plugin only ever appears in the marked extension block
+ * at the end (the docs link, the flags editor, the probe result line and the
  * WSL + Windows-executable notice).
  */
 
 /* ── shared with the reference card ──────────────────────────────────────── */
 
-.card {
-    border: 0.5px solid var(--dsw-alias-border-l4);
-    background: var(--dsw-alias-bg-layer-3);
-    border-radius: 16px;
-    list-style: none;
-    transition: border-color 0.16s, background 0.16s;
-}
-
-.card:hover {
-    border-color: var(--dsw-alias-label-dimmed);
-}
-
-.cardOpen {
-    background: var(--dsw-alias-bg-layer-2);
-    border-color: var(--dsw-alias-label-dimmed);
-}
-
-.header {
-    appearance: none;
-    width: 100%;
-    font: inherit;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    background: 0 0;
-    border: 0;
-    border-radius: 12px;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 16px;
-    display: flex;
-}
-
-.header:focus-visible {
-    outline: 2px solid var(--dsw-alias-brand-primary);
-    outline-offset: -2px;
-}
-
-.headText {
-    flex-direction: column;
-    flex: 1;
-    gap: 4px;
-    min-width: 0;
-    display: flex;
-}
-
-.nameRow {
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    display: flex;
-}
-
-.name {
-    color: var(--dsw-alias-label-primary);
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1.4;
-}
-
-.desc {
-    color: var(--dsw-alias-label-tertiary);
-    font-size: 13px;
-    line-height: 1.5;
-}
-
-.chevron {
-    color: var(--dsw-alias-label-tertiary);
-    flex: none;
-    transition: transform 0.16s;
-}
-
-.chevronOpen {
-    transform: rotate(180deg);
-}
-
+/* The body is the section's content, not a card: the page already draws the
+ * identity line this used to sit under, and the page's own section already
+ * spaces it, so what is left is a plain vertical stack. */
 .body {
-    border-top: 0.5px solid var(--dsw-alias-border-l2);
-    display: flex;
     flex-direction: column;
     gap: 10px;
-    margin: 0 16px;
-    padding: 12px 0;
+    display: flex;
 }
 
 /* Two-row field: title + controls inline above, description full-width below.
@@ -242,6 +167,19 @@
     background: var(--dsw-alias-state-error-primary);
 }
 
+/* The unsaved marker the save line carries while a staged edit is pending. */
+.badge {
+    color: var(--dsw-alias-label-tertiary);
+    background: var(--dsw-alias-bg-layer-1);
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 11px;
+    line-height: 16px;
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+}
+
 .empty {
     color: var(--dsw-alias-label-tertiary);
     margin: 0;
@@ -254,9 +192,9 @@
  * button. The paths drive the wire; the names are only what the user asked to
  * see.
  *
- * The body already carries the card's top rule, so a catalog block must NOT add
- * a second one — the separator belongs between two catalogs (and above a
- * disclosure), never stacked on the body's own line. */
+ * The separator rides **between** two catalog blocks — the page's own section
+ * already ends the line the first catalog opens with, so a block never draws a
+ * rule at its own head. */
 .catalog {
     flex-direction: column;
     align-items: stretch;
@@ -658,7 +596,11 @@
 
 .candidateNote {
     color: var(--dsw-alias-label-tertiary);
-    flex: none;
+    /* A note is prose, not a short status: it shrinks and wraps instead of
+     * pushing the row past the dialog's width. */
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
     font-size: 11px;
     line-height: 16px;
 }
@@ -821,4 +763,69 @@
 .catalogInputMono {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
+}
+
+/* ── extensions: the staged-form footer ─────────────────────────────────── */
+
+/* The form's own save line, carried as a block inside the body the way the
+ * reference's footer sits under its fields: nothing the card edits reaches the
+ * Host until Apply. */
+.footer {
+    border-top: 0.5px solid var(--dsw-alias-border-l2);
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 0 0;
+    display: flex;
+}
+
+.footerError {
+    color: var(--dsw-alias-label-error);
+    text-align: right;
+    min-width: 0;
+    flex: 1;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* Same shape as the dialog's footer buttons: the reference footer's two-button
+ * save, with the primary carrying the save itself. */
+.footerButton {
+    border: 0.5px solid var(--dsw-alias-border-l3);
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--dsw-alias-label-secondary);
+    background: transparent;
+    padding: 5px 14px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.footerButton:hover:not(:disabled) {
+    color: var(--dsw-alias-label-primary);
+    border-color: var(--dsw-alias-label-dimmed);
+}
+
+.footerButton:disabled {
+    cursor: default;
+    opacity: 0.4;
+}
+
+.footerButton:focus-visible {
+    outline: 2px solid var(--dsw-alias-brand-primary);
+    outline-offset: 1px;
+}
+
+.footerButtonPrimary {
+    color: var(--dsw-alias-bg-layer-3);
+    font-weight: 600;
+    background: var(--dsw-alias-label-primary);
+    border-color: transparent;
+}
+
+.footerButtonPrimary:hover:not(:disabled) {
+    color: var(--dsw-alias-bg-layer-3);
+    background: var(--dsw-alias-label-secondary);
+    border-color: transparent;
 }

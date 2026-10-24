@@ -2,12 +2,11 @@
  * Error classification and status notes — the human-readable half.
  *
  * Every capture path (check failure, bridge log line, tool-call result) ends
- * in one capped line written to the base layer's `lastError`; `isChromeMissing`
+ * in one capped line written to the live mirror's `lastError`; `isChromeMissing`
  * decides whether that line is the known, developer-actionable "no Chrome
  * executable detected" state (`chromeMissing`) or a generic failure.
  */
 import { ERROR_CAP } from "./constants.js";
-import type { ToolCallResult } from "./types/index.js";
 
 /** First non-empty line of a text block, capped. */
 export function firstLine(text: unknown, cap: number = ERROR_CAP): string {
@@ -40,23 +39,11 @@ export function isChromeMissing(text: unknown): boolean {
 }
 
 /**
- * Summarize one chrome-tool call result for the card's status line. Failed
- * calls return "<tool> failed: <first text line>" — tool-level errors
- * (browser unreachable, "Target closed", …) are returned to the calling
- * agent and never route through the bridge logger, so this is the only
- * capture point. Successes return null: the caller clears the stored error.
- * @param toolName - fully qualified registered name (`mcp__<server>__<tool>`).
- * @param result - settled tools-service execution result.
- * @returns the note, or null when the call did not fail.
+ * Summarize one chrome-tool call result for the card's status line — the rule
+ * is ancestros' (`host/status.toolResultNote`): failed calls answer
+ * "<tool> failed: <first text line>", successes `null` (the caller clears the
+ * stored error). Tool-level errors (browser unreachable, "Target closed", …)
+ * are returned to the calling agent and never reach a bridge line, so the
+ * tool-call capture is the only place they surface.
  */
-export function toolResultNote(toolName: string, result: ToolCallResult | null | undefined): string | null {
-    if (!result || result.isError !== true) return null;
-    const blocks = Array.isArray(result.content) ? result.content : [];
-    let text = blocks
-        .filter((block) => block && block.type === "text" && typeof block.text === "string")
-        .map((block) => block.text)
-        .join(" ");
-    if (text === "" && result.error && typeof result.error.message === "string") text = result.error.message;
-    if (text === "") text = result.error === void 0 ? "unknown error" : String(result.error);
-    return firstLine(`${toolName.split("__").pop()} failed: ${text}`);
-}
+export { toolResultNote } from "@comecaramelos/dsh-ancesters/host";

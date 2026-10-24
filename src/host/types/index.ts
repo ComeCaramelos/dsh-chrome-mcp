@@ -6,17 +6,27 @@
  * names all of it:
  *
  *   ./stderr.ts     where the bridge console goes + the stderr-wrapper shapes
- *   ./config.ts     the validated row config + reconnect + PluginContext
+ *   ./config.ts     the config `apply` receives + reconnect + PluginContext
  *   ./executable.ts the saved-executable rows + source tag
  *   ./windows.ts    the Prelaunch Windows Chrome run's states + outcome
- *   ./settings.ts   the persisted section, base layer, resolved value, service
+ *   ./settings.ts   the configuration form's layers, the live mirror, the service
  *   ./plugin.ts     the bridge fiber + the tool-call captures
  *
  * Structural views stay narrow: only what the host half actually calls.
  */
 export type { BridgeStderrMode, BridgeStderrNotice, BridgeSpawnTarget, BridgeSpawnOptions, BridgeSpawnResult, BridgeStderrLogPathOptions } from "./stderr.js";
-export type { ChromeMcpConfig, ReconnectConfig, PluginContext } from "./config.js";
+export type { ChromeMcpConfig, ConfigField, ReconnectConfig, PluginContext } from "./config.js";
 export type { ChromeExecutableEntry, ChromeExecutableStatus, EffectiveChromeSource } from "./executable.js";
 export type { WindowsChromeState, WindowsChromeStatus, WindowsChromeLinkAnswer, WindowsChromeRun } from "./windows.js";
-export type { SettingsUserFields, SettingsBaseLayer, SettingsResolved, ValidatedSettings, SettingsOp, SettingsService } from "./settings.js";
+export type {
+    ConfigUserFields,
+    ConfigLiveFields,
+    ConfigLayerFields,
+    ConfigLayers,
+    SettingsForms,
+    SettingsFormRow,
+    SettingsPathOp,
+    ChromeMcpForm
+} from "./settings.js";
 export type { McpBridge, ToolCallExecution, ToolCallResult } from "./plugin.js";
+export type { CommandDefinition, CommandInvocation, CommandResult } from "./services.js";

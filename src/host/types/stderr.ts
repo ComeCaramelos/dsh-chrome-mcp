@@ -15,7 +15,7 @@
 export type BridgeStderrMode = "log" | "console";
 
 /** The spawn-diagnostics subset {@link noteStderr} reads. */
-export type BridgeStderrNotice = { redirect: string; fallback: string };
+export type BridgeStderrNotice = { redirect: string };
 
 /** Spawn target consumed by {@link buildBridgeSpawn}. */
 export type BridgeSpawnTarget = {
@@ -33,15 +33,15 @@ export type BridgeSpawnTarget = {
 
 /** Options for {@link buildBridgeSpawn}. */
 export type BridgeSpawnOptions = {
-    platform?: NodeJS.Platform;
-    exists?: (candidate: string) => boolean;
+    /** The Node that runs the wrapper; defaults to `process.execPath`. */
+    execPath?: string;
     tmpdir?: string;
     pid?: number;
 };
 
 /** One built bridge spawn: the (possibly wrapped) command/args plus where the
- * stderr lands (`redirect`, "" when echoed) and why not (`fallback`). */
-export type BridgeSpawnResult = { command: string; args: string[]; redirect: string; fallback: string };
+ * stderr lands (`redirect`, "" when echoed). */
+export type BridgeSpawnResult = { command: string; args: string[]; redirect: string };
 
 /** Options for {@link bridgeStderrLogPath}. */
 export type BridgeStderrLogPathOptions = { tmpdir?: string; pid?: number };

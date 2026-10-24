@@ -14,24 +14,33 @@ in dedicated modules — the same shape as the sibling plugin
 
 - `src/index.ts` — host half **public surface** (TS, `tsconfig.json`,
   `module: NodeNext`). `npm run build` emits `lib/index.js` (ESM, `main`, plus
-  `.d.ts`/maps): identity (`name`, `inject`), the zod `Config`/`SettingsSchema`,
-  `apply(ctx, config)`, and the diagnostics/test-facing helpers re-exported
+  `.d.ts`/maps): identity (`name`, `inject`), the zod `Config` (every field the card reads is
+  `.volatile()`, so it is both what the plugin runs with and what the form edits),
+  `apply(ctx, config, deps?)` — `deps` is the seam every machine half answers
+  through (the Windows run, and the Windows executables a WSL host locates), so a
+  host with nothing to locate answers none of them, exactly like a machine with
+  nothing installed — and the diagnostics/test-facing helpers re-exported
   from `src/host/*`.
 - `src/host/*` — host behavior: `apply.ts` (wiring: controller + settings
-  section), `controller/` (live state: base layer, bridge fiber, stderr-mode
+  section), `controller/` (live state: the live mirror the Host publishes, bridge fiber, stderr-mode
   switching + announce, the serialized **executable run** (probe the saved rows
   + the row config + the selection, merge what exists into the rows, seed a
   first selection), bridge-log + tool-result captures — split by concern into
   `controller.ts` (the assembly + the public `createChromeMcpController`/
   `ChromeMcpController`/`ChromeMcpControllerDeps`) + `notes.ts`,
   `bridge-run.ts`, `runs.ts`, `windows-run.ts`, `persist.ts`, `captures.ts`,
-  `commits.ts`, all sharing the internal `state.ts` (state + context) and
-  re-exported by `index.ts`),
-  `settings.ts` (namespace install, flags/stderr/executable validation, commit
-  routing), `bridge.ts` (stdio argv + the stderr-capture spawn wrapper + bridge
+  `commits.ts`, `publish.ts` (the live-mirror commit: fold the live fields into
+  the entry's own config, then `describe()` so the mirror advances), all sharing
+  the internal `state.ts` (state + context) and re-exported by `index.ts`),
+  `settings.ts` (the form attach: identity off the profile entry id, the
+  flags/stderr/executable validation that still guards a write, the commit
+  routing, and the `configure({ auto: false })` page policy riding the effect),
+  `bridge.ts` (stdio argv + the stderr-capture spawn wrapper + bridge
   config + logger capture), `catalog.ts` (the saved-executable **rows**: id/name
   rules, normalize, merge-by-id, label), `discovery/` (the candidate list —
-  rows → row config → selection, deduped in that order — and the `--version`
+  row config → what this host carries (on WSL: the Windows executables it
+  locates, offered and never probed) → saved rows → selection, deduped in that
+  order — and the `--version`
   probe that answers for every candidate — split into `candidates.ts`, `probe.ts`,
    `scan.ts`, re-exported by `index.ts`), `flags.ts` (extra-flags validation,
   the executable-path flags folded out of the argv + connect-mode predicates),
@@ -47,9 +56,19 @@ in dedicated modules — the same shape as the sibling plugin
   the MCP-side trigger of the same run, no arguments, driving the controller's
   `prelaunchWindowsChrome`; registration rides `ctx.effect` + lazy
   `ctx.inject(["tools"])`, so an HMR reload always disposes the prior
-  registration and the tools plane is never touched at load order), `values.ts`
+  registration and the tools plane is never touched at load order),
+  `commands/` (the two **headless-mirror slash commands** — `chrome-path.ts`
+  (`/chrome-path [<path>|none]`) mirrors the executable picker and
+  `chrome-refresh.ts` (`/chrome-refresh`) mirrors **Fetch executables**;
+  `index.ts` registers them lazily on the `commands` service (`ctx.effect` +
+  lazy `ctx.inject(["commands"])`, retaining every disposer like the tool half)
+  so a host without a commands plane gets no registration, and both ride the
+  controller's **public** face only — `selectChromePath` (the one persisted
+  `chromePath` field through the Host write-back channel, the re-fired run
+  standing behind it) and the live mirror answers — so the pill, the command
+  and the running bridge never disagree), `values.ts`
   (precedence
-  resolution + persisted reads, including the one-time read of the **legacy**
+  resolution, what the user layer answers against what the row config answers, including the one-time read of the **legacy**
   hand-typed path list), `status.ts` (error classification + tool-result notes),
   `schema.ts`, `constants.ts`, `types/` (split into `stderr.ts`/`config.ts`/
    `executable.ts`/`windows.ts`/`settings.ts`/`plugin.ts`, re-exported by
@@ -68,12 +87,27 @@ in dedicated modules — the same shape as the sibling plugin
    `@deepseek-ai/dsh-client-ui-primitives`
    exist only in the loader's module table and are typed structurally in
    `src/client/shell-modules.d.ts`. Modules: `index.ts` (surface: `apply`,
-   `inject`, the poll budgets), `apply.ts` (mount: injects the
+   `inject`), `apply.ts` (mount: injects the
    stylesheet via `styles/index.js`, registers locales, controller, card
    slot), `controller/` (card
-   snapshot store + write actions + the executable-run revision poll — split into
-   `controller.ts` (the class) + `snapshot.ts`/`read.ts`/`budget.ts`, re-exported by
-   `index.ts`),
+   snapshot store + staged write actions over a `ConfigForm` — split
+   into `controller.ts` (the class: store + publish + settle machinery) +
+   `actions.ts` (the write actions, riding a live view the class hands them) +
+   `snapshot.ts`/`read.ts`, re-exported
+   by `index.ts`). The controller is a **staged form**, not a live writer: every
+   editable field stages into a local draft and reaches the Host **only** through
+   `apply()`, which persists the fields that differ from what is served and clears
+   exactly those drafts (an accepted write settles when the mirror answers back,
+   never on a wait). A draft equal to the served value is not dirty
+   and writes nothing. The draft overlays the served snapshot on every `publish`, so
+   the pill, the saved rows and the flag rows read the staged value while the card is
+   dirty (`snapshot.ts` carries `dirty` / `saving` / `failed`). `discard()` drops the
+   whole draft; the card's **Discard** calls exactly that `discard()` — it drops every
+   staged edit, reverting the pill/rows/flags/toggle to what the host serves. A
+   discarded edit never reached the Host, so what reads back is the served value. The host-run triggers
+   (`refreshExecutables`/Fetch, `openWindowsChrome`/Prelaunch) stay immediate host
+   runs — they write their nonce as a staged field and settle when the mirror answers
+   back, never a poll.
    `catalog.ts` (the client mirror of the saved executable rows: id/name rules,
    normalize, label — pinned against the host module's rules by the same
    fixtures `test/parse.test.mjs` uses), `card/` (the widget, split the way the
@@ -82,17 +116,23 @@ in dedicated modules — the same shape as the sibling plugin
    executable-block actions on one `linkButtonRow` line: **Fetch executables**
    and **Prelaunch Windows Chrome**, the button enabled/disabled/busy answered
    entirely by the served `windowsChromeStatus` — a local run-in-flight overlay
-   keeps it busy until the revision counter settles), the interop notice, the flags rows,
-   the stderr toggle, the error paragraphs, the candidate dialog — over the
-   header carrying the status dot; `view.ts` derives what renders from the served
+   keeps it busy until the served status settles — and **disabled only
+    while it is busy or the host is not WSL**: every failure answer the run gives
+    (`not-found`, `unreachable`) leaves the button clickable, because another run
+    is exactly the retry of the same question), the interop notice, the flags rows,
+   the stderr toggle, the error line, the candidate dialog — as the page section's own
+   stack: since dsh 0.2.0 the Plugins page owns the container and the identity line
+   (crumb, icon, row title and description), so this half carries **no card shell and
+   no collapsable header** — nothing is hidden behind an expand click, and the status
+   dot rides the body's one error line instead; `view.ts` derives what renders from the served
    snapshot; `run-actions.ts` holds the imperative fetch + Windows run logic and their
     busy/dialog/clock state (`useRunActions`), so `index.ts` stays body composition;
     `picker.ts` the executable block (the pill's `Menu`, the saved-rows
    disclosure, the fetch action); `rows.ts` the one row list both catalogs
    render — a bordered box carrying its field(s) and the delete control, the
    empty line and the add control, with the reference card's `editing` map read
-   as a local draft overlay: typing does not persist, a blur/Enter commits the
-   whole list, a delete persists on the spot, an added blank row stays local
+   as a local draft overlay: typing does not persist, a blur/Enter stages the
+   whole list, a delete stages the list without it, an added blank row stays local
    until it carries a value, and a host push replaces an idle draft;
    `dialog.ts` the dialog the fetch action opens; `flags.ts` the extra-flags
    block — the very same rows read through the single field a flag carries
@@ -108,7 +148,7 @@ in dedicated modules — the same shape as the sibling plugin
    `<input type="text">` fields and icon buttons, not shell fields — the two
    blocks are one widget shape, differing only in how many fields a row carries.
    The stylesheet follows the same split: every
-   rule the two cards share (card, header, body, `field`/`fieldRow`, `selector`,
+   rule the two widgets share (`field`/`fieldRow`, `selector`,
    `catalog`/`catalogEntry`/`catalogRow`, the dialog block, the buttons) is the
    reference's rule verbatim, and everything plugin-specific rides as an
    extension (the docs link, the flags rows' single-field column and its
@@ -141,38 +181,55 @@ in dedicated modules — the same shape as the sibling plugin
   its own — the `icon.svg` artwork rides inside it twice, as pure inline SVG:
   the `span.mark` in the page header, and the tab favicon as an encoded
   `data:image/svg+xml` link.
-- `.smoke/` — manual end-to-end fixtures (`fake-npx` + `fake-chrome` shims +
-  `--patch` overlays); `args.log` is the fake-npx invocation log (gitignored).
-- `.probe/` — throwaway probes and field-test evidence (gitignored): the WSL
-  `--executablePath` viability probe, `.probe/field-test.mjs`, a stdio
-  driver of the real `npx` bridge against native Linux Chrome, and the Windows
-  connect probes (`windows-chrome-connect-probe.mjs`: prereq-port
-  reachability discrimination + the `\\wsl.localhost` `--user-data-dir`
-  acceptance; `unc-user-data-dir-probe.mjs`, its predecessor), whose logs are
-  the §-evidence the Windows run quotes (see Testing conventions).
+- `assets/icon.svg` — the row **artwork**: since dsh 0.2.0 the Plugins row resolves its
+  icon only off the package manifest's `icon` field (`readPluginMeta` → `iconOf`: a
+  path relative to the package directory, SVG/PNG/JPEG/WebP, at most 256 KiB, inlined
+  as a `data:` URL) — no `icon` field, no artwork, and no exported `./icon` resource
+  stands in for it. The title/description beside it come from the same manifest
+  (or from the package's `locale/*.json` files when a plugin ships them).
+- `.smoke/` — manual end-to-end fixtures: the `fake-npx` + `fake-chrome`
+  shims and their `--patch` overlays. The `fake-npx` shim records every
+  bridge spawn it sees, so the argv a run actually used stays recoverable
+  from the fixtures themselves; every log a run leaves behind is throwaway
+  local state, never checkout content.
 
 ## Hard constraints (do not break)
 
-- **One settings namespace per host**: `chrome-mcp` is fixed, not derived
-  from `serverName`. A second instance must fail loud, not alias.
-- **Bridge argv shape is fixed**: `npx -y <package> [extraFlags]`
-  (`command: npx`, `package: chrome-devtools-mcp@latest`,
-  `extraFlags: ["--no-usage-statistics", "--no-performance-crux"]` defaults — see
-  `buildServerArgs`), plus `--executablePath=<path>` appended whenever the
+- **One profile entry id per host**: the card addresses Host state by the row's
+  profile entry id (`mcp-chrome`, the `id` the bundle patch inserts), not by a
+  namespace of its own, and `serverName` is *not* part of that identity. Two
+  instances would collide, and the second must fail loud, not alias — the id is
+  the key every read and write goes through.
+- **Bridge argv shape is fixed**: since 2.0 a row with no launcher of its own
+  (the `command: npx` / `package: chrome-devtools-mcp@latest` defaults, or
+  blanks) runs the **pinned** dependency under the host's Node —
+  `<process.execPath> <chrome-devtools-mcp cli> [extraFlags]`, the way dsh's own
+  chrome-devtools provider does (no `npx`, no registry on every start, one route
+  on Linux, WSL and Windows; `serverCommand` / `buildServerArgs`). A row that
+  names its own `command` or `package` keeps `<command> -y <package>
+  [extraFlags]`. The `extraFlags: ["--no-usage-statistics",
+  "--no-performance-crux"]` default rides either, plus
+  `--executablePath=<path>` appended whenever the
   **effective selection** is non-empty (the only source of that flag — see
   the executable-selection bullet). This is the **logical** invocation the
   child always runs. In the default `"log"` stderr mode it is
-  **not** spawned raw: `buildBridgeSpawn` wraps it in a `sh -c` script that
-  `exec`s the argv positionally (the child never sees the wrapper) and sends
-  only stderr to a per-spawn log file, stdout staying the MCP protocol stream.
-  In `"console"` mode (the card's toggle off, or a platform with no POSIX
-  shell) the logical argv is spawned raw. The argv tail itself is unchanged.
+  **not** spawned raw: `buildBridgeSpawn` launches it through
+  `@comecaramelos/dsh-ancesters`' Node wrapper (`process.execPath` + the
+  shipped `stderr-wrapper.js`, D5 — the same route on Linux, WSL and Windows),
+  which hands the argv over verbatim (the child never sees the wrapper) and
+  sends only stderr to a per-spawn log file, stdout staying the MCP protocol
+  stream. In `"console"` mode the logical argv is spawned raw. The argv tail
+  itself is unchanged.
 - **Config passthroughs**: the config row keys `env`, `cwd`,
-  `toolCallTimeoutMs`, `failOnStartupError`, `reconnect` pass through to the
-  nested `dsh-mcp-client` bridge config verbatim; `chromePath` /
+  `toolCallTimeoutMs`, `maxInstructionBytes` (default `32768` UTF-8 bytes — the
+  ceiling on the bridge's server instructions, attribution included, mirroring
+  `dsh-mcp-client`'s own field and default), `failOnStartupError`, `reconnect`
+  pass through to the nested `dsh-mcp-client` bridge config verbatim;
+  `chromePath` /
   `chromePaths` are ours (`chromePath` is the row-config **fallback source** of
   the executable for a host whose card never picked one, `chromePaths` the
-  candidate list a run folds in after the saved rows),
+  candidate list a run folds in first, ahead of what this host carries and of
+  the saved rows),
   and `bridgeStderr` / `bridgeStderrLog` steer the stderr wrapper (mode + log
   path) rather than any nested-bridge field.
 - **Flag validation**: entries are execve'd argv items (no shell), so only
@@ -183,9 +240,11 @@ in dedicated modules — the same shape as the sibling plugin
   so a **legacy** row config that pinned it that way is folded into the
   row-config source of the selection (`extractExecutablePathFlag`) and stripped
   out of the argv (`stripExecutablePathFlags`) — it never reaches the bridge as
-  a second source of truth. All of it runs through `validateExtraFlags` inside
-  the settings `validate` hook; UI write failures surface on the card via
-  `noteError`.
+  a second source of truth. `validateExtraFlags` still answers it, but the gate is the
+  schema: the write path runs the field's own pattern, so control characters are
+  refused Host-side and surface on the card as `noteError` — there is no `validate`
+  hook any more, and a field the card edits has to be `.volatile()` or the write is
+  refused outright (`Config field "<name>" is not volatile`).
 - **Browser switches travel as `--chromeArg`, not as bare flags.** The bridge's
   argv is parsed by a strict yargs parser that knows only its own option names,
   so a bare `--no-first-run` / `--no-default-browser-check` entry is reported on
@@ -206,7 +265,7 @@ in dedicated modules — the same shape as the sibling plugin
   its recommended list is the single entry
   `--chromeArg=--remote-debugging-port=9222` (never the bare
   `--remote-debugging-port`, which the parser drops), served from the host
-  through the static `wslExtraFlags` base-layer mirror exactly the way
+  through the live mirror's `wslExtraFlags` field exactly the way
   `defaultExtraFlags` serves the defaults, so the card carries no copy of the
   recommended list either. The second entry the list once recommended —
   `--user-data-dir=.chrome` — was **measured out**: it was meant to keep the
@@ -218,17 +277,20 @@ in dedicated modules — the same shape as the sibling plugin
   **Flags WSL is the manual path** since the Windows button exists: it hands
   the debug-port flag to the bridge for what you launch yourself, while the
   run keeps owning the Windows-native profile and the saved connect entry.
-- **WSL interop: Windows `chrome.exe` is NOT supported.** Setting
+- **WSL interop: Windows `chrome.exe` is NOT launchable by the bridge.** Setting
   `chromePath`/`--executablePath` to a `/mnt/c/...` executable was tested
-  end-to-end (`.probe/probe.mjs`, 2025-09-19) and fails:
+  end-to-end (2025-09-19) and fails:
   `chrome-devtools-mcp` connects with `pipe: true` (inherited fds 3/4), which
   the Windows-side process cannot receive across the WSL interop boundary
   (`Target.setDiscoverTargets: Target closed`); the WebSocket fallback reads
   `DevToolsActivePort` against `127.0.0.1`, unreachable across the WSL2 NAT
-  bridge (`netstat` shows the port bound to the Windows loopback only). Keep
-  the error surfaces generic — do **not** re-add Windows-path discovery.
-  Re-confirmed 2025-09-21 (`.probe/interop-test.mjs`, bridge 1.9.0, WSL2
-  NAT): the binary **does** execve across interop — `chrome.exe --version`
+  bridge (`netstat` shows the port bound to the Windows loopback only). What the
+  Windows side is good for is **connect mode**, and that is what the **Prelaunch
+  Windows Chrome** run drives — so the Windows executables this host carries are
+  offered as picker candidates, selectable, and **never** probed or launched as a
+  local executable (`WSL_WINDOWS_LAUNCH_ERROR` answers them, and the run drives
+  them in connect mode).
+  Re-confirmed 2025-09-21 (bridge 1.9.0, WSL2 NAT): the binary **does** execve across interop — `chrome.exe --version`
   exits 0 — but every tool call fails `Target.setDiscoverTargets: Target
   closed`. The "seems to work" trap: with a live Windows browser the check
   probe (`--version`) prints "Opening in existing browser session" and
@@ -255,7 +317,7 @@ in dedicated modules — the same shape as the sibling plugin
   spelling, or the PE suffix). Both have to be true at once, so the state is
   keyed on the **selection** in `noteSelection`, never on a probe: a Windows
   binary answers `--version` correctly, so the pill and a healthy probe are
-  exactly what a broken Windows selection looks like. The base layer carries it
+  exactly what a broken Windows selection looks like. The live mirror carries it
   as `wslWindowsExecutable`; the card renders the **static** copy
   (`wslWindowsTitle` / `wslWindowsNote`, inside `STYLES.notice`, `role="note"`)
   while the flag is true and nothing else about the body changes. It is a
@@ -277,8 +339,14 @@ in dedicated modules — the same shape as the sibling plugin
   registers lazily (`ctx.effect` wrapping `ctx.inject(["tools"])`) for the same
   load-order reason the `tools/post-execute` listener avoids a static
   injection. `./windows/` owns the whole sequence — locate the Windows-side binary (`WINDOWS_CHROME_CANDIDATES`,
-  Chrome first, Edge as the alternative; **located host-side only**, never
-  offered as a picker candidate), sample the prereq ports (`135`/`3389` —
+  Chrome first, Edge as the alternative; located host-side through the interop
+  mount, and on a WSL host the located executables also join the executable
+  run's candidate list, so the picker can offer the one the run will drive
+  **and** a selection that already names a Windows executable is handed to the
+  run as its own candidate list — the launched executable is the one the pill
+  states, never the first install the locate happens to find, and an absent
+  selection answers by naming itself),
+  sample the prereq ports (`135`/`3389` —
   Windows-side answers are the reachability answer; a local listener answering
   is *port taken*, never host reachability), pick the first free port of
   `WINDOWS_CHROME_PORT_POOL`, launch by **exec'ing the located executable
@@ -319,8 +387,7 @@ in dedicated modules — the same shape as the sibling plugin
   `windowsChromeProjectDir` resolves the row-config `cwd`, else the **live
   session's workspace** (`ctx.get("sessions")` → a live session's `header.cwd`,
   most recently created wins), else `process.cwd()`. Two measured
-  field notes behind the shape, both from
-  `.probe/windows-chrome-connect-probe.log` 2026-10-06: the `cmd.exe /c start`
+  field notes behind the shape, both measured live 2026-10-06: the `cmd.exe /c start`
   wrapper is **not** used — under interop that wrapper's process does not exit
   while the GUI browser lives, so the launch step could never answer and the
   card sat in "launching" until the spawn timed out (a silent 30 s) while the
@@ -333,26 +400,51 @@ in dedicated modules — the same shape as the sibling plugin
   `npx` parser and does not apply to a launch the bridge is not in). Success
   writes `--browserUrl=http://127.0.0.1:<P>`
   into the **saved** flags through `withBrowserUrlFlag` — replace-by-key, the
-  one connect entry never duplicated (§ idempotency), **and the local
+  one connect entry never duplicated, **and the local
   `--user-data-dir` rows dropped**: upstream refuses `userDataDir` and
   `browserUrl` in the same argv (`Arguments userDataDir and browserUrl are
   mutually exclusive`, measured live 2026-10-04 — a saved Flags-WSL row kept
   next to the run's connect entry leaves the bridge unspawnable). The connect
   entry is *user* state and persists, and the bridge takes it through the
   ordinary `fiber.update()` flag path. The run answers the whole state union through the
-  base layer (`windowsChromeStatus`), and each half is injectable
+  live mirror (`windowsChromeStatus`), and each half is injectable
   (`WindowsChromeRunOptions`: `exists`/`reachable`/`start`/`currentFlags`…)
   because the real half opens sockets and spawns through interop — the same
-  injection rule `platform.ts` follows. The answer lands in the base layer, not
-  in the click's promise: like every executable action it bumps the revision
-  counter the client polls. Three things it never does: launch Windows Chrome
+  injection rule `platform.ts` follows. The answer lands in the live mirror, not
+  in the click's promise: like every executable action it is the field the mirror
+  answers with. Three things it never does: launch Windows Chrome
   into **launch mode** (`--executablePath` stays out of argv entirely while a
   connect flag is present — `buildServerArgs` drops it), edit `~/.wslconfig`
   (prereq checks *read*, never write), or close a Windows browser it started —
   the browser stays user-owned and a connect-mode bridge survives it
   restarting.
-- **Persistence boundary**: only the user-authored fields may land in
-  `$DSH_HOME/settings.yaml`: `extraFlags` (last UI edit),
+- **The headless mirror: `/chrome-path` and `/chrome-refresh`.** The two slash
+  commands registered on the `commands` service (see the `commands/` layout
+  bullet) are the same two executable actions without a GUI, and they keep the
+  same two rules: a command writes the **same persisted field through the same
+  write-back channel** as the card — `selectChromePath` runs the write through
+  `persistChromePath` (`settings.mutate(entryId, …)`, the live clear riding
+  along, no revision fence) and re-fires the ordinary executable run behind the
+  write, exactly the way a picker commit does; and every report is read off the
+  **live mirror**, never more than the run answered. `/chrome-path` with no
+  argument states what the pill states (the current selection + source and the
+  saved rows); with a path it selects that path; with `none` it clears the user
+  layer back to the row config. Control characters are refused on the command
+  door by the same pattern that gates a GUI write. `/chrome-refresh` runs the
+  executable run — the merge into the saved rows already stands inside that run
+  — reports found paths with their version lines and broken ones with their
+  failure lines, and treats "the run never completed" as a failure instead of
+  quoting stale statuses. Registration rides `ctx.effect` + lazy
+  `ctx.inject(["commands"])`, retaining every disposer like the tool half does,
+  so a hot re-apply never collides on a duplicate name and a host without a
+  commands plane simply answers the half with nothing. Commands reach the live
+  state only through the controller's **public** face (`run`, `source`, `live`,
+  `selectChromePath`) — the same rule that keeps every surface reading and
+  writing one field.
+- **Persistence boundary**: only the user-authored fields are persisted, and the
+  store is the profile's own patch layer (no `settings.yaml` any more — a form write
+  goes through `dsh-config-editor` into the row's `config`, which is what
+  `dsh plugin … config` edits): `extraFlags` (last UI edit),
   `refreshExecutablesNonce` (the card's **Fetch executables** trigger),
   `openWindowsChromeNonce` (the card's **Prelaunch Windows Chrome** trigger — the
   same nonce idiom, and a *persisted* value must never drive a launch: the
@@ -365,14 +457,36 @@ in dedicated modules — the same shape as the sibling plugin
   `CATALOG_MAX_LENGTH`). The rows are the one user field the host *also* writes:
   a run merges every candidate path it found into the stored list (new ids only,
   nameless, so a user-given name survives — `mergeEntries`), which is what makes
-  the picker's list grow out of the host's own discovery. `chromeCustomPaths`
+  the picker's list grow out of the host's own discovery — **but a row the user
+  dropped stays dropped**: an id the stored list loses rides into the persisted
+  `droppedExecutables` list (Host-authored; the card never edits it), and the
+  run's merge steps — the fold behind a user write and the legacy fold — skip
+  every id standing there. Without it the deletion is undone by the very run it
+  queues (measured live 2026-10-12: the (x86) Windows-executable row stood
+  straight back up behind the write that dropped it, because the found list
+  answers what the host carries forever). A later list write that carries the
+  id again clears the record, and the row merges like before the drop.
+  `chromeCustomPaths`
   stays in the schema as the **legacy** hand-typed MRU: a first run folds it into
   the rows once and never consults it again (the host reads it through
-  `readPersistedCustomPaths`, the client never writes it).
+  `readPersistedCustomPaths`, the client never writes it). Every **Host-originated**
+  write-back (the seeded `chromePath`, the merged executable rows, the composed
+  connect flag) is answered from the run chain's **neutral async context**: the
+  queue body is bound to a context-free `AsyncResource` (in `runs.ts` —
+  `keepAsyncContext: false`) because a form commit's `loader/volatile-update`
+  emit fires *inside* the write's HMR transaction, and a run scheduled from that
+  emit otherwise inherits the transaction's async-local store; every follow-up
+  config write the run answers then reads as a *nested* transaction and is
+  refused outright ("HMR transactions cannot be nested" — measured live
+  2026-10-12: the card's Prelaunch button settled `connected` while the connect
+  flag silently never reached the patch). The binding sits once on the run body,
+  so each write instead queues normally behind the settled transaction.
   Status (`lastError`, `chromeMissing`, `executableDiscoveryRevision`,
   `chromeVersion`, `executableStatus`, `effectiveChromePath`,
   `effectiveSource`, the `wslWindowsExecutable` mirror of the WSL +
-  Windows-executable state), the static `rowStderr` mirror of the row config,
+  Windows-executable state), the resolved `stderrEffective` mirror of the effective
+  stderr mode (the row config's `bridgeStderr` under the card's toggle — the client
+  snapshot names the same answer `rowStderr`),
   the static `defaultExtraFlags` mirror (the canonical defaults list the card's
   **Restore defaults** control appends), the static `wslExtraFlags` mirror
   (the recommended WSL ↔ Windows flags the card's **Flags WSL** control appends),
@@ -380,19 +494,32 @@ in dedicated modules — the same shape as the sibling plugin
   states `off`/`launching`/`connected`/`unreachable`/`not-found`/`launch-failed`
   /`not-applicable` — the last one read off the host at registration, not after
   any action) and the `carriesConnectionMode` mirror of whether the bridge
-  launches with a connect flag (the same `flagsSkipCheck` answer the probe skip
-  keys on, now served so the card can relabel the pill without a probe)
+  launches with a connect flag (the connect half of what skips the probe —
+  `flagsSkipCheck`; the full probe answer is `flagsSkipProbe`, see the
+  executable-selection bullet — now served so the card can relabel the pill
+  without a probe). That
+  answer is **derived** where it is published — `flagsSkipCheck(state.runningFlags)`
+  restated on every publish — rather than remembered from the one moment a flags
+  list is *applied*. Remembering it there went quiet in both directions (measured
+  live 2026-10-13: a host that starts out running in connect mode, its own saved
+  flags carrying the connect entry with no run ever applying a list, answered
+  nothing and the pill read the local executable; a **Prelaunch Windows Chrome**
+  answer then fell silent again about five seconds later, while
+  `windowsChromeStatus` still answered `connected`).)
   live
-  in the composition **base layer** — the `entry` object handed to
-  `installSection` — held in memory, never persisted. Status reaches the
-  client through the **base clone** that `describe()` attaches to every read
-  (the frozen resolved `value` only folds the base in at commits, so
-  base-only mutations are invisible there); the controller reads status from
-  `snapshot.base`, falling back to `snapshot.value` only when a read carries
-  no base layer. The user-authored fields keep reading `value` (the persisted
-  user layer wins), `rowStderr` keeps reading `base`. The registration run
-  fires off the first commit's nonce diff (`lastRunSeen` starts
-  `undefined`) — no separate registration-time call.
+  in the **live mirror**: every one of them is a `.volatile()` field of the same
+  `Config`, and the controller publishes that mirror by committing it —
+  `entry.update({ config: { ...entry.options.config, ...live } }, false, false)`
+  on `ctx.fiber.entry`, then `settings.describe()`. A purely volatile commit
+  persists nothing (the profile patch files stay as they were) and never remounts
+  the fiber. The card reads all of it from one place, `snapshot.value`: there is no
+  base/user split to consult, because the volatile layer already resolves the
+  *effective* value (the user layer wins over the row config). The distinction the
+  controller still draws — did the user edit this, or does the row config say it —
+  reads the two Host-side layers `describe()` answers with: `user` is what the
+  profile patch carries (presence is the answer), `base` is what the row config
+  carries under it. The registration run fires off the first commit's nonce diff
+  (`lastRunSeen` starts `undefined`) — no separate registration-time call.
 - **Flag change = `fiber.update()`** on the nested mcp-client bridge
   (re-validates + restarts the bridge in place; a successful update clears
   the captured `lastError`). Never recreate the plugin row; never throw out
@@ -406,28 +533,120 @@ in dedicated modules — the same shape as the sibling plugin
   `--browserUrl` flag) actually land instead of losing the connect flags until
   the next real change. It is the `restartBridge` helper, used by every
   flags/executable/stderr switch.
-- **No host→client push for module plugins**: same constraint as the
-  reference (`harness.handle` reserved; `settings/document-updated` fires
-  only on raw user-section changes). An action therefore re-reads the shared
-  describe mirror (`settingsScope.describe().load()`) every 700 ms until
-  `executableDiscoveryRevision` advances (20 s budget) — one counter for every
-  executable action, because one **run** (probe the saved rows + the row config +
-  the selection, merge what exists into the rows, seed when silent) sits behind
-  all of them: Fetch executables and a selection change both wait on the same
-  counter their run bumps. The same mechanism covers dsh-start: the controller's
-  first *ready* publish with the revision still 0 arms a one-shot catch-up poll
-  with the same budget (the registration run lands in the base layer after that
-  first read), so a Chrome-less host lights the error dot without any user
-  action. Each new `waitFor` supersedes the pending one by generation (a manual
-  action settles the catch-up poll, never two loops).
+- **Live state rides the volatile config**: a Host-side live field is a
+  `.volatile()` field of the same `Config`, and publishing it is the push channel —
+  `entry.update({ config: { ...entry.options.config, ...live } }, false, false)` on
+  `ctx.fiber.entry`, followed by `settings.describe()` (the emit path is the same
+  one `invalidate()` sits on, but that one is `private` in `@deepseek-ai/dsh-settings`
+  and only `describe()` typechecks). A volatile-only commit does not remount the
+  fiber, does not persist, and bumps the revision the mirror turns into
+  `settings/document-updated` for the browser — so a card settles off its snapshot
+  and nothing polls `executableDiscoveryRevision` any more, not even for dsh-start
+  (`chromeMissing` is already on the mirror when the first snapshot lands).
+   One consequence of how a form write merges (`strip(raw, form)`, then the changed
+   fields): it *clears* the live-only fields, which a recomposition then answers with
+   their opening answers, and the loader reports that back on this fiber as a
+   `loader/volatile-update` naming live fields and **no** user field. Such a commit
+   routes nothing — the card asked for nothing — and it must **not** publish anything
+   back. Re-asserting the mirror on that echo was measured live 2026-10-12: the extra
+   volatile commit lands **inside** the window every fenced write pass checks against,
+   doubling the revision churn per pass until no pass stood and every save answered
+   `configuration write refused`, the executable pick never landing — the echo is what
+   starves the card's write budget. Nor does it settle: a publish's own echo is itself
+   live-only, so re-asserting on the echo is the mirror chasing its own commit, one
+   extra revision bump per pass, which is exactly the starvation it set out to answer.
+   What stands answered is kept where it is kept — on the write channel (the next
+   bullet) and by the routed half (`onFormCommit`), which re-publishes the mirror when
+   it finishes: after any write that asked for something the references keep answering
+   the real ones, and the echo only adds commits. The reset the echo used to chase is
+   real but brief, and it is answered where it reads: `effectiveChromePath` empty is
+   **not** "nothing selected", it is "the Host has not answered this field yet", so the
+   pill states the saved `chromePath` in its place — what the bridge *would* run, which
+   is the invariant the selection keeps.
+   The same window answers `wslWindowsExecutable` false — a notice that appeared and
+   dropped off again: a `false` read is the ambiguous one (a genuine "nothing Windows
+   is selected" vs "not answered yet"), so while the effective path reads empty with
+   a saved selection standing, the notice holds its **last** answer until the Host
+   answers a runnable selection; a read of `true` is an answer, which is why only the
+   ambiguous false is held.
+   The hold stands the NOTICE up, never the path: an unanswered effective path says
+   nothing about what is selected — not even while the notice holds — and a pill that
+   blanks during a write's own reset window is a selection the user never dropped,
+   lost on every save (measured live 2026-10-12: the Host answers the Windows path
+   itself once it answers at all, so a blocked selection reads as a normal pick plus
+   the notice, and the blanking was only ever the reset). Only where the Host
+   answers an empty path *with* the mirrored flag — "nothing local runs" stated as
+   an answer — does the pill keep inviting a pick with `executableNone`.
+   Pinned by `test/apply.test.mjs` (a live-only commit routes nothing and publishes
+   nothing) and `test/client.test.mjs` (the pill's fallback, the notice's hold, the
+   pill held through a reset, and the blocked-selection answer).
+  One action, one counter: **Fetch executables** and a selection change both ride
+  the same **run** (probe the row config + what this host carries + the saved
+  rows + the selection, merge
+  what exists into the rows, seed when silent) and settle on the same field it bumps,
+  so a busy state never waits on a wall clock. An executable run that settles
+  standing in the **known executable-missing state** arms exactly **one** bounded
+  retry of the *same* run (`DISCOVERY_RETRY_DELAY_MS`, capped by
+  `DISCOVERY_RETRY_MAX`, the counter reset by a run that no longer stands failed,
+  cancelled when the instance is disposed), because that state's shape is often a
+  host that is not ready yet (the interop mount a WSL boot carries the Windows
+  executables on is not always served when the first run fires), and the state
+  would otherwise stand until someone pressed Fetch. The retry invents no clear
+  path of its own — it re-fires the run, so the known error keeps being cleared
+  only by evidence (a probe that answered a version, or a chrome-tool call that
+  succeeded), never by the mere passage of a retry. A run whose only candidates
+  answered a platform *note* (the Windows executable a WSL host cannot launch,
+  which belongs to the **Prelaunch Windows Chrome** run) is a settled answer, not
+  a host not ready yet, so it stands nothing armed.
+- **A persisted write never carries the live mirror** (resolved 2026-10-12 —
+  measured live before the fix, on a linked-profile home with no `mcp-chrome` row
+  of its own: booting the plugin with no user write at all filled the profile's
+  own `cordis.patch.yml` row with the whole live mirror). The publish channel was
+  never the offender — a purely volatile commit persists nothing — but every
+  write-back the Host answers through `settings.mutate(entryId, …)` (the seeded
+  `chromePath`, the merged `executables` rows, the composed connect flag) carries
+  one `unset` for every live-mirror field alongside the one field it sets (the
+  list is `liveMirrorKeys()` in `../host/values.js`). That list is pinned by
+  `test/schema.test.mjs`: every live-mirror key must be a declared `.volatile()`
+  field of the same `Config`, and every volatile field that is *not* one of the
+  six card writes or the two Host-side persisted records (`chromeCustomPaths`,
+  `droppedExecutables`) must ride the mirror — a live answer the `Config` never
+  declared reads nothing and fails every existing surface pin in silence. An `unset` returns the field
+  to its row-config answer, and live-only fields have none, so they drop out of
+  what the write lands — and a row already carrying leaked live keys is healed by
+  its first write (measured live: a leaked row boots clean with its user fields
+  standing; a clean row stays clean through Host write-backs and through plain
+  one-field GUI saves, which need no clear and in fact must not carry one: a GUI
+  write carrying the 13 unsets alongside the user's field must survive four
+  revision-fenced passes to land, and the live mirror's revision churn refuses
+  them all — measured live 2026-10-12 as `configuration write refused` with the
+  card's pick never landing. The clear therefore stands on the Host's own write
+  channel, where it was measured accepted and where it heals, and not on the
+  card's write door).
+- **A Host write-back re-asserts the mirror whether it lands or is refused**
+  (resolved 2026-10-13 — measured live before the fix, on a host whose selection
+  stood at the bogus `foo/bar`: the run's rows merge answered `Chrome executable
+  not found: foo/bar` into the live mirror, the write-back that followed was
+  refused (`Configuration for "mcp-chrome" is overridden by …`), and the
+  refused write had **still** answered its `unset` ops, so the references went
+  back to the mirror's opening answers and the row served no error at all — the
+  pill kept stating the pick (the client's documented fallback for an
+  unanswered effective path) while `lastError`/`chromeMissing` read empty/false
+  ever after. Nothing else answers it back: the known-error persistence rule
+  keeps the bridge captures that would re-publish suppressed while that state
+  stands. The rule therefore sits on the write itself — `persist` re-publishes on
+  **both** sides of `settings.mutate` (see ./host/controller/persist.ts), pinned
+  by `test/apply.test.mjs`'s refused-write case.)
 - **Connection-error capture**: the bridge reports failures only through its
   own `ctx.logger` (reconnect warn lines, give-up errors, spawn failures).
   The plugin therefore creates its scope child with
   `ctx.extend({ logger: captureLogger(ctx.logger, noteBridgeLog) })` and
   mounts the bridge on that scope: bridge `warn`/`error` lines land in the
-  base-layer `lastError` (first line, capped); the
-  `reconnected and re-synced tools` info line clears it. Each captured line is
-  also classified by `isChromeMissing` into the base-layer `chromeMissing`
+  live-mirror `lastError` (first line, capped); the
+  `reconnected and re-synced tools` info line clears it — while the known
+  executable-missing state stands, neither of them may: see the known-error
+  bullet. Each captured line is
+  also classified by `isChromeMissing` into the live-mirror `chromeMissing`
   flag (see the known-error bullet). Our own logs stay
   on the unwrapped logger.
 - **Tool-call error capture**: browser-level failures surface only as the
@@ -439,17 +658,17 @@ in dedicated modules — the same shape as the sibling plugin
   `inject: ["tools"]` would risk a load-order cycle because our own nested
   bridge is what provides the tools); any settled result whose registered
   name is prefixed `mcp__<serverName>__` and carries `isError` writes
-  `toolResultNote` into the base-layer `lastError` (`<tool> failed: <first
+  `toolResultNote` into the live-mirror `lastError` (`<tool> failed: <first
   text line>`), classified by `isChromeMissing` into `chromeMissing`; a
   successful chrome-tool call clears both, so the card reports
   current health. The listener body is wrapped in try/catch (warn only — a
   capture fault must never break a tool call) and returns `next()` unchanged.
   This complements, not replaces, the bridge-log capture above.
 - **Known "executable missing" error**: the not-detected state is a
-  distinguishable known error, held in the base layer as `chromeMissing`.
+  distinguishable known error, held in the live mirror as `chromeMissing`.
   It carries no dedicated UI: the card reports it exactly like any other
-  failure — through the single red header status dot, whose `title` holds
-  the full message. The flag alone also keeps the dot red after a
+  failure — through the single red status dot leading the body's one error
+  paragraph, the dot's `title` holding the full message. The flag alone also keeps the dot red after a
   bridge-update-success clear of `lastError` (`applyFlags` clears the
   captured error but deliberately not the flag); the tooltip then falls
   back to the short `chromeMissing` label. `isChromeMissing` owns the
@@ -457,13 +676,37 @@ in dedicated modules — the same shape as the sibling plugin
   "Failed to launch the browser process") and is applied on check failures,
   bridge-log captures and tool notes. A check that ran **no** probe (empty
   `chromePath` resolves `""`) must **not** clear `lastError` or
-  `chromeMissing` — upstream discovery failed, silence is not health. Only
-  a probed success or the bridge-reconnect line clears the flag.
-- **Persisted flags seed the connection**: `readPersistedFlags(ctx)` reads
-  the user layer (all-non-empty-string check only) before the first bridge
-  spawn when the settings service is already up, so the initial connection
-  — and every in-process reconnect, which reuses the bridge config — starts
-  on the last saved flags.
+  `chromeMissing` — upstream discovery failed, silence is not health.
+  **The known error is persistent**: once the mirror states it, what clears
+  it is **evidence** — a probe of the selection that answered a version, or
+  a chrome-tool call that succeeded. Nothing else may: a bridge capture line
+  that is not the known error never replaces the answer that stands, a bridge
+  **reconnect** line clears nothing while the flag stands (it proves the
+  bridge connected, never that the executable runs), and a successful
+  `fiber.update()` still clears the captured *connection* error exactly as it
+  did while no known error stood (and clears nothing once one stands). A
+  capture line that **is** the known error refreshes the message and keeps
+  the flag. (Measured live 2026-10-12: on a host whose fixed selection had
+  disappeared, the probe's `Chrome executable not found: <path>` answer and
+  its flag were knocked aside one capture later — every connection-retry line
+  classifies as *not* the known error, so each flipped the flag back to
+  `false`, and within a second the broken pick read as healthy again.)
+  A discovery miss that found **no note** to answer with carries the upstream
+  troubleshooting advice after the canonical line (source:
+  [`docs/troubleshooting.md`](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/troubleshooting.md)
+  — the guide that also documents the interop finding behind the WSL notice
+  above): install Google Chrome inside the Linux environment, on a WSL host
+  with the **Prelaunch Windows Chrome** run (connect mode) named next to the
+  Windows side. The advice is composed where the answer is composed (the run's
+  not-found branch), never a capture-time suffix, and only on a Linux host —
+  the candidate list only models the stable-channel installs of a Linux kernel.
+  Off Linux, or where a Windows note already answered *why* nothing runs, the
+  line stays bare.
+- **Persisted flags seed the connection**: the first bridge spawn reads the
+  effective flags off the volatile reference (all-non-empty-string check only),
+  which at `apply` time answers exactly what the user layer carries when the user
+  said anything, so the initial connection — and every in-process reconnect, which
+  reuses the bridge config — starts on the last saved flags.
 - **Flags precedence** (highest first): UI selection (settings user layer) →
   `DSH_CHROME_MCP_FLAGS` (`FLAGS_ENV_VAR`, whitespace-separated list resolved
   through `launchEnvironmentOf(ctx)`, never raw `process.env`; invalid values
@@ -471,21 +714,37 @@ in dedicated modules — the same shape as the sibling plugin
   schema default.
 - **Bridge stderr capture ("Reduce log output")**: the MCP stdio transport
   spawns `npx` with inherited stderr, so every startup/progress line lands on
-  the dsh console. The default mode `"log"` wraps the spawn in a `sh -c`
-  (`buildBridgeSpawn`) that `exec`s the logical argv positionally and redirects
-  **only stderr** to a per-spawn log file (`bridgeStderrLogPath`:
-  `<tmpdir>/dsh-chrome-mcp-<serverName>-bridge-<pid>.log`, or a non-empty
-  `bridgeStderrLog` override); stdout keeps flowing as the MCP protocol stream.
-  The wrapper is transparent to the child (`exec "$GATEWAY" "$@"`). It must
-  `exit 127` with a message ON stderr when the executable is absent (otherwise
-  the transport reports a bare code and the reason is buried in the log). On a
-  non-POSIX platform (or with no `sh`) the redirect is impossible: spawn the
-  raw argv and set `fallback` ("platform"/"shell") so `noteStderr` warns once.
-  Effective mode = UI `stderrMode` → row config `bridgeStderr`; the card's
-  toggle persists it and, like a flag change, switches **in place** with
-  `fiber.update()` (the wrapper is fixed at spawn). It is the shell `Switch`
-  primitive, checked only when the host resolves
-  "log" — never a phantom state.
+  the dsh console. The default mode `"log"` launches the spawn through
+  ancestros' Node wrapper (`buildBridgeSpawn` → `buildSpawn`, D5), which hands
+  the logical argv over verbatim and redirects **only stderr** to a per-spawn
+  log file (`bridgeStderrLogPath` → ancestros' `stderrLogPath`: one private
+  directory per host process, created with `mkdtemp` in mode `0700` and
+  holding `<serverName>-bridge.log` — never a name predictable from
+  `serverName` + `pid`, which a second local account could plant; or a
+  non-empty `bridgeStderrLog` override); stdout keeps flowing as the MCP
+  protocol stream. The wrapper is transparent to the child, exits `127` with a
+  message ON stderr when the executable is absent, forwards SIGTERM/SIGINT, and
+  works the same on Linux, WSL and Windows — there is no `fallback` any more.
+   Effective mode = UI `stderrMode` → **row-config `stderrMode`** → row-config
+  `bridgeStderr`; the card's toggle persists it and, like a flag change, switches
+  **in place** with `fiber.update()` (the wrapper is fixed at spawn). It is the
+  shell `Switch` primitive, checked only when the host resolves "log" — never a
+  phantom state. The row-config step is load-bearing, not a nicety: a profile that
+  carries `stderrMode` in its own patch row never edits it through the card, so
+  nothing ever *writes* that field, and the references the Host started with can
+  resolve it as empty while the described row states one — the Host then runs one
+  mode while the card states the other. And because the card stages the flip as a
+  diff against *what is effective*, every flip then reads as "already served": no
+  draft, no staged badge, **Apply** disabled, and the control is dead for the exact
+  profile that set the switch in its own row (measured live 2026-10-12). Two
+  invariants answer it: the Host resolves through `resolveStderrModeFromLayers`
+  (which reads the row-config layer, not only the references) and states
+  `stderrEffective` on **every** commit rather than only when a switch fires; and
+  the card's own single reading is "what the field states, else the mirror", used
+  for the checked state, the dirty test, the draft clear and the write alike, so
+  nothing in the toggle can disagree with what the toggle would change
+  (`test/apply.test.mjs`'s stderr section and the client's stale-mirror case pin
+  both).
 - **Executable selection — there is no "auto" mode**: the picker owns the
   executable, and the client never sees a mode setting. The **effective
   selection** resolves `chromePath` (the persisted user layer — UI-written, or
@@ -501,9 +760,10 @@ in dedicated modules — the same shape as the sibling plugin
   bridge runs.
   One **executable run** does the work (`runExecutableDiscovery`, queued through
   one promise chain and followed by the probe of the selection): it probes every
-  candidate of `chromeExecutableCandidates` (the saved rows → row `chromePaths` →
+  candidate of `chromeExecutableCandidates` (row `chromePaths` → what this host
+  carries → the saved rows' ids →
   the selection, deduped in that order), publishes the whole answer list as
-  `executableStatus` (`{ path, version, error }`, keyed by path) so the picker
+  `executableStatus` (`{ path, version, error, note }`, keyed by path) so the picker
   always says what exists — a runnable candidate answers with its `--version`
   line, a broken one keeps its place carrying the failure line instead of
   vanishing into the dot, and one that is simply absent spawns nothing and answers
@@ -513,15 +773,34 @@ in dedicated modules — the same shape as the sibling plugin
   run: the **Fetch executables** button triggers it (`refreshExecutablesNonce`),
   and a selection change re-runs it behind the write, so the pill's own answer
   lands with the rest.
-  Connect-mode flags (`--browserUrl` / `--wsEndpoint`, mirrored out as the base
-  layer's `carriesConnectionMode`) skip the probe — there is no local executable
-  to check. The card reads the same mirror to **relabel the pill**: while a connect
+  Every upstream connect-mode spelling skips the local executable probe:
+  `--browserUrl` / `--browser-url` / `-u`, `--wsEndpoint` / `--ws-endpoint` /
+  `-w`, and the attach-to-a-live-browser `--autoConnect` / `--auto-connect`
+  (Chrome 144+, connects through `chrome://inspect/#remote-debugging`). The
+  connect half answers through `carriesConnectionMode`/`flagsSkipCheck`,
+  mirrored out as the base layer's `carriesConnectionMode`. The **probe skip**
+  is wider: `flagsSkipProbe` also exonerates `--config <file>` (a config file
+  can fix the executable the bridge runs, whatever the argv looks like) and
+  any `--channel` other than `stable` (upstream looks in a channel the
+  candidate list does not model, so discovery would only report "not found"
+  about a browser living elsewhere). Neither is mirrored as connect mode — the
+  bridge still launches a local executable, only the local check cannot answer
+  for it. Every skip answers the check as `""` — *no evidence*, never health:
+  it clears nothing and badges nothing, seeds nothing.
+  The card reads the same mirror to **relabel the pill**: while a connect
   flag carries the bridge, the pill reads `connectModeLabel` (the `connectMode`
   address the run answered with when it has one), the picker's hint says the
   bridge connects instead of launching, and the pill stays openable —
   because it does not claim a local selection the bridge is not running (its
   label is the connect address), while the saved rows stay reachable and
-  editable so the selection the bridge resumes with is one click away. A path the host must
+  editable so the selection the bridge resumes with is one click away. The pill
+  asks the **saved flags** as well, for the same reason it asks the saved
+  `chromePath` when the live effective path reads empty: a connect entry is a real
+  config field that no write-back clears, so it keeps the answer standing across the
+  reset window every write leaves behind (measured live 2026-10-13 — the **Prelaunch
+  Windows Chrome** answer fell silent about five seconds after it landed, and a
+  later edit that never touched the flags turned it back on by itself; the pill's
+  reading never disagreed with what the bridge launches with either way). A path the host must
   **never exec** skips it too, answered by the `blockedForPlatform` callback
   threaded through `scanChromeExecutables` / `discoverChrome`
   (the controller supplies it: WSL host **and** a Windows-executable path →
@@ -530,26 +809,44 @@ in dedicated modules — the same shape as the sibling plugin
   and attaching **starts a browser instance** (measured 2026-09-30 on WSL2 +
   Google Chrome 153 — the probe spawns the browser process plus its crashpad
   handler, while no tool call could ever drive what it started). A blocked
-  candidate therefore keeps its place in the answer list carrying that reason —
-  it is not `presentOnDisk`-filtered, because what it *would* do is what gets
-  reported, not whether it is there — and it answers no version, so it never
-  seeds as a runnable executable and the picker shows it tagged unavailable. A
-  blocked *selection* resolves `""`, which clears nothing: the card's
-  `wslWindowsExecutable` notice stays the whole report, and the probe result line
-  goes blank instead of quoting a version the run did not answer with. Off WSL
+  candidate therefore keeps its place in the answer list carrying that reason as
+  a `note` — **never** as the `error` line, because a failure is what tags a picker
+  option unrunnable, and this executable is offered to be *selected*. It is not
+  `presentOnDisk`-filtered: what it *would* do is what gets reported, not whether
+  it is there. So the option reads plain (no tag, no red dot), the dialog row
+  carries the note, and nothing answers a version — which is exactly why it never
+  seeds. What a blocked
+  *selection* clears is the probe answer, not the selection: `noteSelection`
+  keeps answering `effectiveChromePath` with the path itself (measured live
+  2026-10-12 — the pill states the path, carrying the notice beside it, it does
+  not blank to `executableNone`), while the probe result line goes blank instead
+  of quoting a version the run did not answer with. Off WSL
   the very same path is probed like any other (the skip is platform-keyed, not a
   rule about how Windows paths look); pin flags no longer exempt anything.
   Upstream starts the browser **lazily**, on the first tool call (see
   `ensureBrowserLaunched` in the npx-cached `chrome-devtools-mcp`), which is why
-  the host probes eagerly instead of waiting for a tool call. Never add
-  WSL-side `/mnt/c` candidates — the picker must never offer what cannot run.
+  the host probes eagerly instead of waiting for a tool call. A WSL host's offer
+  is never an invented `/mnt/c` guess — it is the executable it *located*, plus
+  whatever the profile already carried. Two interop spellings of one file are one
+  executable: the identity the answer list keys on folds the Windows spelling
+  through the mount, so the same `chrome.exe` never occupies two rows. A path
+  may be stored shell-style with the spaces escaped (`Program\ Files`), and a
+  saved row or row config may carry that spelling, so `windowsPathToMount` folds
+  the escape back to the space it stands for **before** folding any separator —
+  folding the escape into a slash instead produced `Program/ Files`, which exists
+  nowhere, so the **Prelaunch Windows Chrome** run answered `not-found` for a
+  Chrome it had located (measured live 2026-10-12: the button read dead on every
+  click; pinned by `test/windows.test.mjs`).
 
 ## Client-bundle gotchas (imported from the reference, still true)
 
 - React children must go in `props.children` (3rd `jsx()` arg is the `key`
   slot).
-- Card renders only when its slot `key` matches a served settings namespace
-  (`chrome-mcp`) — registration is unconditional, rendering is keyed.
+- Card renders only for its own row: it registers the **row configuration** slot
+  (`plugins.row.config`) under `@comecaramelos/dsh-chrome-mcp#mcp-chrome`, and the
+  Plugins page hands the entry `view: "summary"` for its one-liner and
+  `view: "page"` plus the form for the body. `plugins.item` is *not* ours — it is
+  the official-plugins surface. Registration is unconditional; rendering is keyed.
 - Stylesheets are authored as **CSS Modules** (
   `src/client/styles/ChromeMcpCard.module.css`): the build's `dsh-css-modules`
   esbuild plugin validates with postcss, minifies with esbuild's CSS pipeline,
@@ -561,31 +858,49 @@ in dedicated modules — the same shape as the sibling plugin
   names never has DOM side effects. No literal class names in the sources.
 - Snapshot-store hook name is derived: `hooks.chromeMcpCard` →
   `useChromeMcpCard` prop.
-- The poll loop owns a controller `pollTimer`: `dispose()` must clear
-  it, and every `mirror.load().then` must re-check `disposed` before
-  arming the next tick (a load can resolve after dispose). One loop runs at
-  a time: every wait takes the same generation counter, so the action the
-  user clicks settles the catch-up poll instead of starting a second one.
+- There is no poll loop any more: live Host state arrives through the config-form
+  mirror, so the controller owns no `pollTimer` and no revision wait — but
+  `dispose()` still has to release every subscription it took, and a `then` still
+  re-checks `disposed`, because an accepted write can settle after the card is gone.
+- A write carries **no** revision of the card's own; the form it goes through fences
+  the pass on the revision it *mirrors*, and answers a refusal by re-reading the Host
+  document before it resolves `false`. A revision read on the card side is always
+  behind that — the row page hands its own `state` as a snapshot taken when the page
+  rendered, and the live mirror keeps moving while the write crosses the wire — so
+  handing one in fences the write on a view the Host has already moved past. The
+  revision is never still under a live card: every live commit the Host publishes
+  (every bridge line, every probe answer, every selection change) advances it, and a
+  bridge that cannot start answers continuously, which is exactly when the executable
+  has to be picked. A refused pass is therefore not a broken edit but "read me
+  again", so the edit is re-issued against the re-read until it lands; a write refused
+  for the whole pass budget is a real refusal and reports as one.
+  Without the re-issue the executable dropdown reads as a dead control, and the card
+  snaps back to every field as the Host had been answering it — a pick that lands
+  nowhere is indistinguishable from a form that reset itself.
 - The flags block renders the same rows list as the executable block (`./rows.ts`),
   read through the single field a flag is: the served list is `state.extraFlags`
-  mapped one field per row, a blur/Enter commits the whole list through
-  `controller.saveFlags(flags)` → `scope.set`, a delete persists on the spot, and
+  mapped one field per row, a blur/Enter **stages** the whole list through
+  `controller.saveFlags(flags)` (`apply()` persists only what differs — nothing
+  lands until **Apply**), and
   **Add flag** appends a local blank row. The write side drops a row left blank
   (the host rejects an empty entry) and folds a repeated flag to its first row —
   exactly what the saved executable rows do with a repeated id. **Restore
   defaults** is one list action: it keeps every flag the rows carry and
   appends only the defaults the host serves through `state.defaultExtraFlags`
-  (the base-layer mirror) that are not already present — the card carries no copy
+  (the live mirror) that are not already present — the card carries no copy
   of the defaults list, and the control never drops a flag. Disabled when the host
   serves no defaults list. **Flags WSL** is the other list action and follows the
   same append-only merge rule against the other host-served list
   (`state.wslExtraFlags`, the recommended WSL ↔ Windows flags served by the host's
-  `wslExtraFlags` base-layer mirror): it keeps what the rows carry and appends
+  `wslExtraFlags` live mirror): it keeps what the rows carry and appends
   only the recommended ones still missing, disabled when the host serves no
   recommended list. The two controls ride one `linkButtonRow` line so the block
   keeps a single-action rhythm. Neither list holds a `useRef`: both read their draft
   from `useState`, so the hook count has to stay stable across renders either way.
-- Locale keys (`en`, tested in `client.test.mjs`): `title`, `description`,
+- Locale keys (`en`, tested in `client.test.mjs`) — **no identity or disclosure
+  keys**: the row's title and description are the page's own, and nothing is
+  collapsed behind a header, so `title`/`description`/`expand`/`collapse` are not
+  keys of this bundle:
   `executableLabel`, `executableHint`, `executableNone`, `executableRows`,
   `executableIdLabel`, `executableIdPlaceholder`, `executableNameLabel`,
   `namePlaceholder`, `addExecutable`, `removeExecutable`, `fetchExecutables`,
@@ -601,7 +916,8 @@ in dedicated modules — the same shape as the sibling plugin
   `windowsChromeNotWsl`, `windowsChromeNotFound`, `windowsChromeUnreachable`,
   `connectModeLabel`, `connectModeHint`,
   `reduceLabel`, `reduceTitle`, `reduceHint`, `docsMessage`, `docsLinkLabel`,
-  `statusError`, `statusOk`, `chromeMissing`, `readOnly`, `expand`, `collapse`.
+  `statusError`, `statusOk`, `chromeMissing`, `readOnly`, `apply`,
+  `discard`, `saving`, `unsaved`, `saveFailed`.
   No key names an automatic mode — there is none, and no key names a source tag:
   what the pill and the rows show is the saved **name**, falling back to the
   path. The picker's copy is the `executableLabel`/`executableHint` pair, the
@@ -611,8 +927,10 @@ in dedicated modules — the same shape as the sibling plugin
   `executableEmpty`. The fetch action opens the reference's **candidate dialog**
   (`dialogExecutablesTitle` + `dialogExecutablesDescription`, a
   `searchExecutables` field, one `candidate` row per path the run answered for
-  carrying its note — a version line, a failure line, or `candidateSaved` for
-  what the rows already carry — plus `selectAll`, `addSelected` and `cancel`):
+  carrying its note — a version line, a failure line, `candidateSaved` for what
+  the rows already carry, or why the host must never exec it (the host's own
+  note text, no key of its own) — plus `selectAll`, `addSelected` and
+  `cancel`):
   this is where a run's per-path answer reads, so a row carries no status line of
   its own. The probe result line (`role="status"`, under the rows) is what makes
   a run visible on a healthy host: a host that answers with the version already
@@ -628,10 +946,12 @@ in dedicated modules — the same shape as the sibling plugin
   none, and the `addFlag` / `removeFlag` controls around the **Restore defaults**
   and **Flags WSL** list actions (each localizable by `flagsRestore`/`flagsWsl`,
   with their tooltips via `flagsRestoreTitle`/`flagsWslTitle`). Error reporting mirrors the
-  reference: the header dot (`role="img"`, `aria-label` `statusError`/`statusOk`,
-  `title` the full message or the short `chromeMissing` label when only the known
-  flag is set) plus the body paragraph `p.error` (`role="status"`) for the
-  captured `lastError` and for a rejected write — no badge. The "Reduce log
+  reference: one body paragraph `p.error` (`role="status"`) leads with the status
+  dot (`role="img"`, `aria-label` `statusError`/`statusOk`, `title` the full message
+  or the short `chromeMissing` label when only the known flag is set) and quotes what
+  failed — the captured `lastError`, a rejected write, or the known missing-executable
+  state. There is no second error paragraph, and the staged-edit badge rides the save
+  line (the footer), the identity line being the page's own. The "Reduce log
   output" control is the shell `Switch` primitive (`checked`, `label`,
   `disabled`, `onChange`) drawn in the `fieldRow` beside `fieldTitle`, inside
   `STYLES.toggleLabel` carrying `reduceTitle` as its tooltip, above the
@@ -647,24 +967,45 @@ in dedicated modules — the same shape as the sibling plugin
   stubbed `window.__ModuleLoader__`, `document`, `react` (incl. `useRef`),
   `react/jsx-runtime`, `@deepseek-ai/dsh-client-store` and
   `@deepseek-ai/dsh-client-ui-primitives` (its `Menu` stub records the props
-  each render hands it), plus a stub settings scope — assert registration,
+  each render hands it), plus a stub configuration form (`getSnapshot` /
+  `subscribe` / `mutate`) — assert registration,
   exports, rendered tree (docs message/link, the extra-flags rows, the dropdown's
   items + the anchored pill, the saved executable rows with their answers + the
-  delete/add/search controls, error dot), and that the editor and each executable
-  action writes the right settings field (`extraFlags`, `chromePath`,
-  `executables`, `refreshExecutablesNonce`) and then waits on
-  `executableDiscoveryRevision`. A function component must be expanded **exactly
+  delete/add/search controls, the error line with its dot, and that the root is the
+  body stack with no collapsable header of its own), and that the editor and each executable
+  action writes the right field (`extraFlags`, `chromePath`, `executables`,
+  `refreshExecutablesNonce`) and then settles as the served revision advances. A function component must be expanded **exactly
   once** per render: re-calling it from a later traversal hands it fresh hook
   slots and it reads its state from the wrong slot, which is why the test expands
   the tree inside `render()` and keeps `walk` purely structural.
 - Host behavior: boot the plugin from source with `.smoke/overlay.yml` under
-  an isolated `DSH_HOME` — `DSH_HOME=.smoke/home dsh web --patch
-  .smoke/overlay.yml --port 8765 --no-open` (repo root). For failure paths,
-  `.smoke/overlay-fake.yml` + `fake-npx`/`fake-chrome` booted with
-  `dsh web --patch .smoke/overlay-fake.yml --port N --no-open`;
-  watch `.smoke/args.log` for argv and the logs for captured bridge errors.
-- Client test's vm sandbox needs `setTimeout`/`clearTimeout` (the action
-  polls schedule against the browser globals).
+  a throwaway `DSH_HOME` (a scratch home, never the live one) —
+  `DSH_HOME=<scratch-home> dsh web --patch .smoke/overlay.yml --port 8765
+  --no-open` (repo root). For failure paths, `.smoke/overlay-fake.yml` +
+  `fake-npx`/`fake-chrome` booted with `dsh web --patch
+  .smoke/overlay-fake.yml --port N --no-open`; the `fake-npx` shim records the
+  argv of every bridge spawn it serves, so watch that shim's argv log and the
+  host logs for the captured bridge errors. A row **inserted by** `--patch` is
+  read-only for the configuration form — every write is refused with
+  `Configuration for "mcp-chrome" is overridden by a home patch or command-line
+  overlay`, so this idiom exercises everything **except** saving. To run the write
+  path live, mount the checkout the way a profile does: a
+  `"@comecaramelos/dsh-chrome-mcp": "link:<this-checkout>"` dependency in the
+  scratch profile's `package.json`, the bundle named in
+  `dsh.profile.bundles`, no overlay row — then a `settings.update` from an injected
+  observer entry lands in that profile's `cordis.patch.yml` (read it: the row appears
+  with its `config`) and comes back as `describe().user` after a restart.
+- **Form-surface test** (`test/schema.test.mjs`): reads the **served** configuration
+  form back out of the compiled `Config` (the field types carrying `meta.volatile`)
+  and pins it four ways — the exact volatile list, the exact non-volatile list, the
+  six fields the card **writes**, and the seventeen fields it **reads** back off the
+  served value (plus the four served-but-unread fields: the two host-run triggers,
+  the legacy hand-typed path list, and the Host's own dropped-row record). This is the
+  regression net the migration itself needs: a field that loses its `.volatile()`
+  marker keeps working everywhere it is read and fails only when the GUI saves it, so
+  no other test would notice (`stderrMode` or `windowsChromeStatus` losing the marker takes this one down).
+- Client test's vm sandbox needs `setTimeout`/`clearTimeout` (a settled write is
+  awaited through the browser timers, so a tick must be drainable).
 - **Windows Chrome run tests** (`test/windows.test.mjs`): the run is driven
   against injected fakes (the exact `start` argv, the port pool, every error
   state) and the controller wiring against `createChromeMcpController(ctx,
@@ -672,8 +1013,8 @@ in dedicated modules — the same shape as the sibling plugin
   stub carrying lazy `inject`/`effect` (registration disposes with the effect;
   the definition's `output.render` projects the one text block) — the real
   interop half (sockets, spawns, the `\\wsl.localhost` UNC) is never exercised
-  by a test, per the injection rule; field evidence lives in `.probe/`
-  instead.
+  by a test, per the injection rule; field evidence comes from the manual
+  field runs below instead.
 - **A test selection must never resolve to an executable that exists.** A probe
   runs `chromePath --version` as written, so any candidate list or selection
   that *is* present execs the real browser — under WSL that includes
@@ -684,21 +1025,20 @@ in dedicated modules — the same shape as the sibling plugin
   yet still read as Windows-side by the picker. `process.execPath` (node) is the
   accepted stand-in when a probe must *answer*. Assert what the probe did by
   what it reports:
-  - a probeable path that is not there → the base layer reports
+  - a probeable path that is not there → the live mirror reports
     `executable not found: <that path>`;
-  - a Windows path on a WSL host → nothing was exec'd by definition, so the base
-    layer answers **no** version and no error (see the probe-skip rule under
+  - a Windows path on a WSL host → nothing was exec'd by definition, so the live
+    mirror answers **no** version and no error (see the probe-skip rule under
     *Executable selection*); asserting `executable not found` there would be
     wrong — it would mean a probe ran.
-- **Windows Chrome field test** (manual, documented in
-  `docs/windows-chrome-connect-button-plan.md` §7): the run's host halves are
+- **Windows Chrome field test** (manual): the run's host halves are
   faked in the unit suite by design, so a real launch is a manual step, never
   an automated one. Requirements: `networkingMode=mirrored` in
-  `%USERPROFILE%\.wslconfig` followed by `wsl --shutdown` (check with
+  `~/.wslconfig` followed by `wsl --shutdown` (check with
   `wslinfo --networking-mode` — the plugin only *reads* this answer, never
-  writes it), a WSL checkout whose Windows-side Chrome exists at
-  `C:\Program Files\Google\Chrome\Application\chrome.exe`. Boot the
-  plugin against an isolated `DSH_HOME=.smoke/home2`, open the card, click
+  writes it), a Windows-side Chrome the run can locate
+  (any install `WINDOWS_CHROME_CANDIDATES` answers for). Boot the
+  plugin against a throwaway `DSH_HOME`, open the card, click
   **Prelaunch Windows Chrome** — or call the `prelaunch_windows_chrome` tool from
   the agent — and watch the answers the run states: the Windows browser opens a
   window carrying `--remote-debugging-port=9222` with its profile at
@@ -711,59 +1051,65 @@ in dedicated modules — the same shape as the sibling plugin
   what replaces the startup tab), the pill flips to `connect mode`, and the tool
   roundtrip (`new_page` → `list_pages`) drives it. The page is the part a unit run
   cannot answer (it injects `landing`), so the CDP tab list is the evidence:
-  `.probe/windows-chrome-landing-probe.mjs` drives the real run against a
-  non-default port (9240 by default, so a live 9222 session stays untouched),
-  prints every page's URL, and exits non-zero unless exactly one tab carries
-  `prelaunch-<port>.html`. Run it **outside** the agent's file sandbox: the page
+  once the run settles, read the debugging endpoint's page list — print every
+  page's URL and require exactly one tab carrying `prelaunch-<port>.html`
+  (drive the check on a non-default port, so a live 9222 session stays
+  untouched). Run it **outside** the agent's file sandbox: the page
   lands under `%LOCALAPPDATA%`, which a sandboxed host denies and the run then
   answers "" for — no page, same launch. Measured live 2026-10-04 (port 9240):
-  the run connects, the single page the debugging endpoint lists is
-  `file:///C:/Users/<user>/AppData/Local/dsh-chrome-mcp/prelaunch-9240.html`, and
-  **no** second tab rides along — so both the 9P read and the positional-URL
+  the run connects, the single page the debugging endpoint lists is the run's
+  own `prelaunch-9240.html`, read back with the Windows `file:///…` spelling,
+  and **no** second tab rides along — so both the 9P read and the positional-URL
   startup shape hold. The port-in-use path is real too: an
   answering 9222 (local *or* Windows — indistinguishable under mirrored) moves
-  the run to `.chrome-9223`. A failed click must leave the *previous* connect
-  entry untouched — launch-failed never rewrites the saved flags.
-- **Native-Chrome field test** (WSL, 2025-09): drive the real bridge with
-  `.probe/field-test.mjs` (stdio MCP over `npx -y chrome-devtools-mcp@latest
-  … --executablePath=/usr/bin/google-chrome`). On a live `dsh web` host
+  the run to the next free port of the pool. A failed click must leave the
+  *previous* connect entry untouched — launch-failed never rewrites the saved
+  flags.
+- **Native-Chrome field test** (WSL, 2025-09): drive the real bridge over stdio
+  MCP (`npx -y chrome-devtools-mcp@latest
+  … --executablePath=<the system Chrome>`). On a live `dsh web` host
   nothing extra is needed — a tool-call roundtrip passed with default flags
   (upstream discovery picked `/opt/google/chrome/chrome`). Inside the agent's
   **file sandbox** Chrome cannot launch with the same command
   (`Target.setDiscoverTargets: Target closed`: the sandbox denies
   `/dev/shm` shared-memory + `~/.config` writes, and core-dumps on the
   crashpad failure) — this is an environment artifact, **never** "fix" it by
-  demanding permission escalation. Run it sandbox-clean instead:
-  `FIELD_SANDBOX_CLEAN=1 node .probe/field-test.mjs`, which redirects
-  `HOME`/`npm_config_cache` into `.probe/home/` and `TMPDIR`/
-  `XDG_RUNTIME_DIR` into `.probe/user-data/`, and adds the bridge pass-through
-  args `--allow-unrestricted-paths` (1.9.0 otherwise sandboxes file-write
-  tools to the OS temp dir) `--chromeArg=--disable-dev-shm-usage`
+  demanding permission escalation. Run it sandbox-clean instead: redirect
+  `HOME`/`npm_config_cache` into a scratch home and `TMPDIR`/
+  `XDG_RUNTIME_DIR` into a scratch user-data dir, and add the bridge
+  pass-through args `--allow-unrestricted-paths` (1.9.0 otherwise sandboxes
+  file-write tools to the OS temp dir) `--chromeArg=--disable-dev-shm-usage`
   `--chromeArg=--no-sandbox`. `--chromeArg=<flag>` is the only way to reach
   Chrome's argv: bare `--disable-dev-shm-usage`/`--no-sandbox` hit the
   yargs parser first (`Unknown arguments`, dropped).
 
 ## Install / dev notes
 
+- Since 2.0 this package is a component, **not a bundle**: never put it in
+  `dsh.profile.bundles`. Link it into a profile with the manager's
+  `node scripts/link-profile.mjs [profile]` (this checkout next to
+  `dsh-mcp-manager`), which links the manager, the manager bundle and the
+  components and registers only the bundle. Use the `plugin-dev` profile or a
+  throwaway `DSH_HOME`, never the live `web` profile.
 - On WSL with Windows-side pnpm, `dsh plugin add link:...` fails
   (`ERR_PNPM_PACKAGE_MANAGER_SYMLINK_FAILED` — Windows pnpm cannot symlink
-  WSL dirs). Link the checkout only in the `plugin-dev` profile (the live
-  `web` profile consumes npm packages only), by hand:
-  1. `ln -s <this-checkout> ~/.dsh/profiles/plugin-dev/node_modules/@comecaramelos/dsh-chrome-mcp`
-     (make the scope dir first);
-  2. add `"@comecaramelos/dsh-chrome-mcp": "link:<this-checkout>"` to the
-     `dependencies` of `~/.dsh/profiles/plugin-dev/package.json` — without a
-     dependency the entry has no installed-state counterpart;
-  3. ensure the name sits in `dsh.profile.bundles` (`dsh plugin --profile
-     plugin-dev list` reconciles it in).
+  WSL dirs); use the WSL-side dsh/pnpm.
   The checkout wins over any published copy only if global install locations
   stay free of `@comecaramelos/*` — global copies resolve ahead of the
-  profile `link:` (see `~/.dsh/profiles/plugin-dev/AGENTS.md`).
+  profile `link:`.
 - Live-reload caveat: `patchReload: live` re-applies **patch config**; it
   does **not** re-import changed plugin JS. JS changes need a `dsh web`
   restart.
 - `DSH_HOME=<dir>` is honored (dsh-home-paths): boot against an isolated
   home when the real settings must not be touched.
-- **Shared-file hazard**: a second instance shares `~/.dsh/settings.yaml`
-  with the live GUI (the `chrome-mcp` section) — a test flags write
-  hot-relaunches the *live* instance's bridge. Restore immediately after.
+- **Shared-file hazard**: a second instance shares the live profile's config
+  document with the live GUI (the `mcp-chrome` row's `config` lives in the same
+  profile) — a test that writes flags hot-relaunches the *live* instance's bridge.
+  Boot against a throwaway `DSH_HOME` instead, and restore what you wrote.
+- Always start dsh with `--no-open` (otherwise it opens a tab in the user's
+  browser). On Windows, never run `chrome.exe --version`: it opens a browser
+  window.
+- Docs: `README.md` is for people and short; longer topics live in
+  `docs/knowledge/*.md` (linked from the README); agent-only rules live here.
+  `docs/spec/`, `docs/plans/` and `docs/security-audit/` are local (ignored) —
+  nothing versioned links to them. Only finished work is committed.

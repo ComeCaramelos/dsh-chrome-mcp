@@ -1,19 +1,25 @@
 /**
  * Host half — the **prelaunch_windows_chrome** tool.
  *
- * The second trigger of the same Windows Chrome run the card button drives:
- * the run itself lives in ./windows/, the queueing + state mirror in the
+ * The second trigger of the same Windows Chrome run the card button drives: the
+ * run itself lives in ./windows/, the queueing + state mirror in the
  * controller, and registering the tool is plain wiring — the definition adds
  * no logic of its own, it just hands the model the button's action (the run
  * answers through `windowsChromeStatus`, exactly like a click does).
  *
+ * With the component model the run feeds connections, not a bridge this row
+ * owns: live `chrome-windows` connections are refreshed against the run
+ * (idempotent — the live URL rides into the run's `currentFlags`), and a run
+ * that connected without one says what would drive it.
+ *
  * The two registration rules this module keeps:
  *
- * - The tools service is injected **at mount time**, not statically: our own
- *   nested mcp-client row is what publishes the bridge's tools, so a static
- *   `inject: ["tools"]` on this plugin would risk the same load-order cycle
- *   the tool-result listener bullet warns about. `ctx.inject` resolves the
- *   service lazily, which is what the listener idiom already relies on.
+ * - The tools service is injected **at mount time**, not statically: the
+ *   connections' nested mcp-client fibers are what publish the bridge's tools,
+ *   so a static `inject: ["tools"]` on this plugin would risk the same
+ *   load-order cycle the tool-result listener bullet warns about. `ctx.inject`
+ *   resolves the service lazily, which is what the listener idiom already
+ *   relies on.
  * - The registration lives on one fiber effect. An HMR reload disposes the
  *   old instance's effect first, so the tool re-registers cleanly instead of
  *   colliding with a still-held global registration; the effect body guards
@@ -52,11 +58,12 @@ export function prelaunchWindowsChromeDefinition(controller: ChromeMcpController
     return {
         name: PRELAUNCH_WINDOWS_CHROME_NAME,
         description:
-            "Open the Windows-side Chrome on WSL and switch the Chrome bridge to connect mode — the same run the card's Prelaunch Windows Chrome button drives. " +
-            "Takes no arguments: the host locates the Windows browser, checks that the Windows loopback is reachable from this WSL host " +
+            "Open the Windows-side Chrome on WSL — the same run the card's Prelaunch Windows Chrome button drives. " +
+            "Takes no arguments: the host launches the Windows executable the picker selected when that selection is a Windows one (otherwise it locates one), " +
+            "checks that the Windows loopback is reachable from this WSL host " +
             "(networkingMode=mirrored is a manual Windows-side setting it only reads), picks the first free debugging port, launches with a " +
             "Windows-side profile under LOCALAPPDATA linked into the workspace as .chrome, opens a packaged page in that window explaining " +
-            "that it was opened by the plugin so the agent can drive it from WSL, and connects on the port's address. On a non-WSL host it answers \"not applicable\". " +
+            "that it was opened by the plugin so the agent can drive it from WSL, and reports the debugging URL. Live Windows Chrome connections, if any stand, refresh against the run instead of launching a second browser. On a non-WSL host it answers \"not applicable\". " +
             "The browser it started is never closed by the plugin.",
         parameters: { type: "object", properties: {}, additionalProperties: false },
         output: {

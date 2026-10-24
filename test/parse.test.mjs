@@ -20,18 +20,35 @@ import {
 	mergeEntries,
 	normalizeCustomPaths,
 	normalizeEntries,
+	pinnedServerCli,
+	probeExecutable,
+	serverCommand,
+	readConfigForm,
+	readConfigLayers,
 	readPersistedChromePath,
 	readPersistedCustomPaths,
 	readPersistedFlags,
+	readWindowsInstallVersion,
 	resolveEffectiveChromePath,
 	resolveEnvFlags,
+	resolveLaunchFlags,
 	sameFlags,
 	scanChromeExecutables,
 	stripExecutablePathFlags,
 	toolResultNote,
 	validateExtraFlags,
+	WINDOWS_VERSION_UNKNOWN,
 	WSL_EXTRA_FLAGS
 } from "../lib/index.js";
+
+/** What a probe of `process.execPath` answers: its `--version` line on POSIX;
+ * on Windows nothing is spawned and `node.exe` has no version folder. */
+const PROBED_VERSION = process.platform === "win32" ? /^version unknown$/u : /^v\d+\./u;
+
+/** The pinned `chrome-devtools-mcp` CLI a row with no launcher of its own runs
+ * (under this Node) — what replaced `npx -y chrome-devtools-mcp@latest`. */
+const CLI = pinnedServerCli();
+assert.match(CLI, /chrome-devtools-mcp[\\/]build[\\/]src[\\/]bin[\\/]chrome-devtools-mcp\.js$/u, "the CLI is the dependency's own bin");
 
 // ── validateExtraFlags ─────────────────────────────────────────────────────
 // Flags are execve'd as argv entries (no shell), so only control characters
@@ -102,21 +119,27 @@ assert.deepEqual(
 assert.deepEqual(stripExecutablePathFlags(["--headless"]), ["--headless"], "nothing to strip leaves the list alone");
 
 // ── buildServerArgs ────────────────────────────────────────────────────────
-// Bridge argv tail: `-y <package> [extraFlags]` (+ --executablePath=<path>
-// when config.chromePath is set and no executable-path flag is present).
+// Bridge argv tail: `<pinned cli> [extraFlags]` for a row with no launcher of
+// its own, `-y <package> [extraFlags]` for one that names its package
+// (+ --executablePath=<path> when config.chromePath is set and no
+// executable-path flag is present).
 assert.deepEqual(
 	buildServerArgs({ package: "chrome-devtools-mcp@latest", chromePath: "" }, ["--no-usage-statistics", "--no-performance-crux"]),
-	["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--no-performance-crux"],
-	"npx -y <package> plus flags"
+	[CLI, "--no-usage-statistics", "--no-performance-crux"],
+	"the pinned CLI plus flags"
 );
+assert.equal(serverCommand({ command: "npx", package: "chrome-devtools-mcp@latest" }), process.execPath, "the row defaults run the pinned server under this Node");
+assert.equal(serverCommand({ command: "", package: "" }), process.execPath, "so do blanks");
+assert.equal(serverCommand({ command: "npx", package: "chrome-devtools-mcp@1.2.3" }), "npx", "a row that names its package keeps its own launcher");
+assert.equal(serverCommand({ command: "/opt/bin/bridge", package: "chrome-devtools-mcp@latest" }), "/opt/bin/bridge", "and so does one that names its command");
 assert.deepEqual(
 	buildServerArgs({ package: "chrome-devtools-mcp@latest", chromePath: "" }, ["--headless", "--isolated"]),
-	["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"],
+	[CLI, "--headless", "--isolated"],
 	"flags keep their order"
 );
 assert.deepEqual(
 	buildServerArgs({ package: "chrome-devtools-mcp@latest", chromePath: "" }, undefined),
-	["-y", "chrome-devtools-mcp@latest"],
+	[CLI],
 	"missing flags degrade to the bare launch"
 );
 assert.deepEqual(
@@ -126,22 +149,22 @@ assert.deepEqual(
 );
 assert.deepEqual(
 	buildServerArgs({ package: "chrome-devtools-mcp@latest", chromePath: "/usr/bin/google-chrome" }, []),
-	["-y", "chrome-devtools-mcp@latest", "--executablePath=/usr/bin/google-chrome"],
+	[CLI, "--executablePath=/usr/bin/google-chrome"],
 	"chromePath appends the upstream executable-path flag"
 );
 assert.deepEqual(
 	buildServerArgs({ package: "chrome-devtools-mcp@latest", chromePath: "/usr/bin/google-chrome" }, ["--channel=beta"]),
-	["-y", "chrome-devtools-mcp@latest", "--channel=beta", "--executablePath=/usr/bin/google-chrome"],
+	[CLI, "--channel=beta", "--executablePath=/usr/bin/google-chrome"],
 	"chromePath appended after user flags"
 );
 assert.deepEqual(
 	buildServerArgs({ package: "chrome-devtools-mcp@latest", chromePath: "/usr/bin/google-chrome" }, ["--executablePath=/opt/chrome"]),
-	["-y", "chrome-devtools-mcp@latest", "--executablePath=/opt/chrome"],
+	[CLI, "--executablePath=/opt/chrome"],
 	"never a double pin (defensive: validate rejects such flags before they reach the bridge)"
 );
 assert.deepEqual(
 	buildServerArgs({ package: "chrome-devtools-mcp@latest", chromePath: "   " }, []),
-	["-y", "chrome-devtools-mcp@latest"],
+	[CLI],
 	"whitespace-only chromePath is no executable path"
 );
 
@@ -160,46 +183,32 @@ assert.deepEqual(resolveEnvFlags(["--a"], "headless"), ["headless"], "entries ne
 assert.deepEqual(resolveEnvFlags(["--a"], "--headless\u0001x"), ["--a"], "invalid env list falls back to row config");
 
 // ── readPersistedFlags ─────────────────────────────────────────────────────
-// Returns the stored user-layer extraFlags only when the settings service is
-// up and every entry is a non-empty string; otherwise undefined.
-const ctxWith = (settings) => ({ get: (name) => (name === "settings" ? settings : void 0) });
-assert.deepEqual(
-	readPersistedFlags(ctxWith({ document: { "chrome-mcp": { extraFlags: ["--headless"] } } })),
-	["--headless"],
-	"valid stored flags are returned"
-);
-assert.deepEqual(
-	readPersistedFlags(ctxWith({ document: { "chrome-mcp": { extraFlags: [] } } })),
-	[],
-	"an explicit empty list is honored"
-);
-assert.equal(
-	readPersistedFlags(ctxWith({ document: { "chrome-mcp": { extraFlags: ["ok", 42] } } })),
-	void 0,
-	"non-string entry invalidates the whole list"
-);
-assert.equal(
-	readPersistedFlags(ctxWith({ document: { "chrome-mcp": { extraFlags: "x" } } })),
-	void 0,
-	"non-array value is ignored"
-);
-assert.equal(readPersistedFlags(ctxWith({ document: {} })), void 0, "absent namespace is ignored");
-assert.equal(
-	readPersistedFlags(ctxWith({ document: { "chrome-mcp": "junk" } })),
-	void 0,
-	"non-object section is ignored"
-);
-assert.equal(readPersistedFlags(ctxWith(void 0)), void 0, "absent settings service is ignored");
-assert.equal(
-	readPersistedFlags({ get: () => { throw new Error("boom"); } }),
-	void 0,
-	"settings lookup failure is swallowed"
-);
-// returned list is a copy, not an alias of the document section
-const mutable = { document: { "chrome-mcp": { extraFlags: ["--headless"] } } };
-const got = readPersistedFlags(ctxWith(mutable));
-got.push("--isolated");
-assert.equal(mutable.document["chrome-mcp"].extraFlags.length, 1, "result is a defensive copy");
+// Answers the user layer's extraFlags only when the form row is described and
+// every entry is a non-empty string; otherwise undefined. "Described" is the
+// one read of `readConfigLayers` over the config references plus the row —
+// the patch layer answers `user`, the row config answers `base`, and before
+// the service resolves there is no described row, only the references.
+const layersWith = (user) => readConfigLayers({}, { ns: "mcp-chrome", user, base: {} });
+assert.deepEqual(layersWith({ extraFlags: ["--headless"] }).user.extraFlags, ["--headless"], "the user layer is what the read answers against");
+assert.deepEqual(readPersistedFlags(layersWith({ extraFlags: ["--headless"] })), ["--headless"], "valid stored flags are returned");
+assert.deepEqual(readPersistedFlags(layersWith({ extraFlags: [] })), [], "an explicit empty list is honored");
+assert.equal(readPersistedFlags(layersWith({ extraFlags: ["ok", 42] })), void 0, "non-string entry invalidates the whole list");
+assert.equal(readPersistedFlags(layersWith({ extraFlags: "x" })), void 0, "non-array value is ignored");
+assert.equal(readPersistedFlags(layersWith({})), void 0, "absent field is ignored");
+assert.equal(readPersistedFlags(layersWith("junk")), void 0, "non-object layer is ignored");
+assert.equal(readPersistedFlags(readConfigLayers({})), void 0, "no described row (no settings service yet) is ignored");
+// A described lookup that cannot answer is the same cold path as no service:
+// readConfigForm swallows the failure and answers undefined.
+const brokenForm = { describe: () => { throw new Error("boom"); } };
+assert.equal(readConfigForm(brokenForm, "mcp-chrome"), void 0, "a failing describe is not a row");
+assert.equal(readPersistedFlags(readConfigLayers({}, readConfigForm(brokenForm, "mcp-chrome"))), void 0, "the failing lookup degrades to the cold path");
+// The list that lands in the running state is a copy, never an alias of the
+// layer: resolveLaunchFlags folds the user flags through the argv stripping,
+// which answers a fresh list every time.
+const mutableLayers = layersWith({ extraFlags: ["--headless"] });
+const resolved = resolveLaunchFlags(mutableLayers, void 0);
+resolved.push("--isolated");
+assert.equal(mutableLayers.user.extraFlags.length, 1, "the running list is a defensive copy");
 
 // ── checkChrome ────────────────────────────────────────────────────────────
 // Empty chromePath probes the candidate list: a missing executable is the known
@@ -226,6 +235,54 @@ await assert.rejects(
 	/Chrome executable not found: no executable detected/u,
 	"a pin flag no longer suppresses the probe"
 );
+// Every upstream connect-mode spelling leaves the check mute — the camelCase
+// spellings, their kebab-case aliases, the short `-u`/`-w` entries, and the
+// attach-to-a-live-browser form `--autoConnect`/`--auto-connect` (Chrome 144+
+// connects through `chrome://inspect/#remote-debugging` instead of launching).
+for (const flags of [
+	["--autoConnect"],
+	["--auto-connect"],
+	["-u", "http://127.0.0.1:9222"],
+	["-w", "ws://127.0.0.1:9222/devtools/browser"],
+	["--browser-url=http://127.0.0.1:9222"],
+	["--ws-endpoint=ws://127.0.0.1:9222/devtools/browser"],
+	["--browserUrl", "http://127.0.0.1:9222"],
+	["--wsEndpoint", "ws://127.0.0.1:9222/devtools/browser"]
+]) {
+	assert.equal(
+		await checkChrome({ chromePath: "", chromePaths: ["/nonexistent-dir/x"] }, flags),
+		"",
+		`${flags.join(" ")} connects — no executable check`
+	);
+}
+// A config file can fix the executable (and the connect mode) itself: the argv
+// no longer states locally what will run. And an `--channel` other than the
+// `stable` the candidate list models makes discovery report "not found" about a
+// browser living in another channel — so both leave the check mute as well. A
+// flag that merely *names* the channel's default (`stable`) changes nothing.
+for (const flags of [
+	["--config=/tmp/chrome.json"],
+	["--config-path", "/tmp/chrome.json"],
+	["--config", "/tmp/chrome.json"],
+	["--channel=beta"],
+	["--channel=canary"],
+	["--channel", "dev"],
+	["--channel", "beta"]
+]) {
+	assert.equal(
+		await checkChrome({ chromePath: "", chromePaths: ["/nonexistent-dir/x"] }, flags),
+		"",
+		`${flags.join(" ")} answers for something the check cannot`
+	);
+}
+for (const flags of [["--channel=stable"], ["--channel", "stable"], ["--headless"], ["-e", "/opt/custom/chrome"]]) {
+	await assert.rejects(
+		checkChrome({ chromePath: "", chromePaths: ["/nonexistent-dir/x"] }, flags),
+		/Chrome executable not found: no executable detected/u,
+		`${flags.join(" ")} still answers the local check itself`
+	);
+}
+
 // A missing executable reports the human-readable not-found error.
 await assert.rejects(
 	checkChrome({ chromePath: "/nonexistent-dir/chrome-should-not-exist" }),
@@ -234,12 +291,44 @@ await assert.rejects(
 );
 // A runnable executable resolves its --version first line.
 const version = await checkChrome({ chromePath: process.execPath });
-assert.match(version, /^v\d+\./u, "a working executable returns the version line");
+assert.match(version, PROBED_VERSION, "a working executable returns the version line");
+
+// ── the Windows probe: never spawned ───────────────────────────────────────
+// On Windows a Chromium browser asked `--version` opens a window (or hands one
+// to the running instance) instead of answering, so the win32 probe reads the
+// install's version folder and never runs the file. The fake below would leave
+// a marker if anything ran it — on every platform the suite runs on.
+{
+	const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = mkdtempSync(join(tmpdir(), "dsh-chrome-probe-"));
+	try {
+		const marker = join(dir, "ran");
+		const fake = join(dir, "chrome.exe");
+		writeFileSync(fake, `#!/bin/sh\ntouch "${marker}"\necho "Google Chrome 1.2.3.4"\n`);
+		chmodSync(fake, 0o755);
+		mkdirSync(join(dir, "9.0.100.1"));
+		mkdirSync(join(dir, "155.0.8059.85"));
+		mkdirSync(join(dir, "SetupMetrics"));
+		assert.equal(await probeExecutable(fake, "win32"), "155.0.8059.85", "the highest version folder beside the executable is the answer");
+		assert.equal(existsSync(marker), false, "and the executable was never run");
+		assert.equal(readWindowsInstallVersion(fake), "155.0.8059.85", "the same read, direct");
+		rmSync(join(dir, "9.0.100.1"), { recursive: true });
+		rmSync(join(dir, "155.0.8059.85"), { recursive: true });
+		assert.equal(await probeExecutable(fake, "win32"), WINDOWS_VERSION_UNKNOWN, "no version folder answers unknown, still without running it");
+		assert.equal(existsSync(marker), false, "nothing ran on the fallback either");
+		await assert.rejects(probeExecutable(join(dir, "absent.exe"), "win32"), (error) => error.code === "ENOENT", "a missing file rejects like a spawn's ENOENT");
+		assert.equal(await probeExecutable("chrome", "win32"), WINDOWS_VERSION_UNKNOWN, "a bare name has no folder to read and is not run");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
 
 // ── discoverChrome ─────────────────────────────────────────────────────────
 // Candidate order: ENOENT candidates are skipped, the first runnable one wins.
 const discovered = await discoverChrome(["/nonexistent-dir/absent-one", "/nonexistent-dir/absent-two", process.execPath]);
-assert.match(discovered, /^v\d+\./u, "discovery resolves the first runnable candidate's version line");
+assert.match(discovered, PROBED_VERSION, "discovery resolves the first runnable candidate's version line");
 // All absent → the known error listing the checked paths.
 let discoveryError;
 await discoverChrome(["/nonexistent-dir/absent-one", "/nonexistent-dir/absent-two"]).catch((error) => (discoveryError = error));
@@ -250,9 +339,10 @@ assert.equal(isChromeMissing(discoveryError.message), true, "discovery miss is i
 assert.equal(await discoverChrome([]), "", "empty candidate list resolves nothing");
 
 // ── chromeExecutableCandidates: the picker's candidate list ─────────────────
-// Row-config paths first (the list `discoverChrome` would have used), then the
-// ids the saved rows carry, then whatever the current selection points at —
-// deduped, in the order the card lists them.
+// Row-config paths first (the list `discoverChrome` would have used), then what
+// the machine carries beyond them, then the ids the saved rows carry, then
+// whatever the current selection points at — deduped, in the order the card
+// lists them.
 assert.deepEqual(
 	chromeExecutableCandidates({ chromePaths: ["/usr/bin/chrome", "/opt/chrome"] }, ["/home/u/chrome", "/opt/chrome"], "/usr/bin/chrome"),
 	["/usr/bin/chrome", "/opt/chrome", "/home/u/chrome"],
@@ -264,6 +354,27 @@ assert.deepEqual(
 	["/x"],
 	"whitespace entries are dropped"
 );
+// What the host carries — the one source being the Windows-side executables a
+// WSL host reaches through the interop mount — joins the list after what the
+// profile configures and before what the saved rows carry. Being *offered* is
+// the whole point of the fold: a blocked candidate answers no version and is
+// never spawned (see the blocked rule below).
+const CARRIED = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+assert.deepEqual(
+	chromeExecutableCandidates({ chromePaths: ["/usr/bin/chrome"] }, ["/home/u/chrome"], "", [CARRIED, "/home/u/chrome"]),
+	["/usr/bin/chrome", CARRIED, "/home/u/chrome"],
+	"what the machine carries lands after the configured paths, deduped against the saved rows"
+);
+assert.deepEqual(
+	chromeExecutableCandidates({ chromePaths: [] }, [], "", [CARRIED, CARRIED]),
+	[CARRIED],
+	"the fold answers the location itself, not twice"
+);
+assert.deepEqual(
+	chromeExecutableCandidates({ chromePaths: ["/a"] }, [], "", void 0),
+	["/a"],
+	"a host that carries nothing answers no extra candidate"
+);
 
 // ── scanChromeExecutables: every candidate probed, none short-circuited ─────
 const fs = await import("node:fs");
@@ -272,7 +383,7 @@ const scan = await scanChromeExecutables([run, "/nonexistent-dir/absent", run]);
 assert.equal(scan.length, 1, "the runnable path appears once, absent candidates never listed");
 assert.equal(scan[0].path, run, "the status carries the path it stands for");
 assert.equal(scan[0].error, "", "a runnable entry carries no error");
-assert.match(scan[0].version, /^v\d+\./u, "a runnable entry carries its version line");
+assert.match(scan[0].version, PROBED_VERSION, "a runnable entry carries its version line");
 // Present but not runnable stays visible with the failure. A binary that exits
 // non-zero on `--version` is the shape upstream itself reports.
 const broken = ["/usr/bin/false", "/bin/false"].find((p) => fs.existsSync(p));
@@ -325,7 +436,9 @@ assert.equal(isValidEntryId("/a".repeat(600)), false, "an absurd path fails the 
 // answering means attaching to the Windows browser session, and that **starts a
 // browser instance** no tool call could ever drive. The hook is how the host
 // says "never exec this" without the suite depending on a Windows install being
-// present: a blocked candidate keeps its place in the list and never spawns.
+// present: a blocked candidate keeps its place in the list and never spawns,
+// answering the reason as a `note` rather than as a failure — the executable is
+// there, only not launchable *as one* from here, which the Windows run answers.
 const BLOCKED = "blocked by platform";
 // A Windows-side spelling that resolves to nothing on a Linux host, so a probe
 // that *did* try to exec it would surface as an executable-missing error rather
@@ -335,9 +448,22 @@ const blockedHook = (candidate) => (candidate === WINDOWS_BIN ? BLOCKED : "");
 const blockedScan = await scanChromeExecutables([WINDOWS_BIN, run], blockedHook);
 assert.equal(blockedScan.length, 2, "a blocked candidate stays visible instead of vanishing into a red dot");
 assert.equal(blockedScan[0].version, "", "a blocked candidate answers no version because it was never exec'd");
-assert.equal(blockedScan[0].error, BLOCKED, "the entry carries the reason it was blocked");
+assert.equal(blockedScan[0].error, "", "and it is not reported as a failed probe");
+assert.equal(blockedScan[0].note, BLOCKED, "the entry carries the reason as a note");
 assert.equal(blockedScan[1].error, "", "a probeable candidate in the same list still probes");
-assert.match(blockedScan[1].version, /^v\d+\./u, "and answers with its version");
+assert.equal(blockedScan[1].note, "", "and a probe answers no note");
+assert.match(blockedScan[1].version, PROBED_VERSION, "and answers with its version");
+
+// The same executable reaches the list in either interop spelling: the drive-letter
+// one the locate answers, the mount one a saved row or the row config can carry.
+// They fold into **one** entry — otherwise the fetch dialog offers one browser
+// twice, and the run's `checked:` line names the same file twice.
+{
+	const spellings = ["C:\\dsh-chrome-mcp-test\\chrome.exe", "/mnt/c/dsh-chrome-mcp-test/chrome.exe"];
+	const folded = await scanChromeExecutables(spellings, (candidate) => BLOCKED);
+	assert.equal(folded.length, 1, "one executable answers once, whichever side of the boundary it is spelled from");
+	assert.equal(folded[0].note, BLOCKED, "and the surviving entry is the first spelling seen");
+}
 
 // A blocked **selection** probes nothing: no version, no error line — the
 // card's WSL notice is what explains the state, not a probe result.
@@ -406,17 +532,21 @@ assert.equal(resolveEffectiveChromePath("/home/u/chrome", "/usr/bin/chrome"), "/
 assert.equal(resolveEffectiveChromePath("", "/usr/bin/chrome"), "/usr/bin/chrome", "row config is the fallback");
 assert.equal(resolveEffectiveChromePath("", ""), "", "nothing selected resolves nothing");
 assert.equal(resolveEffectiveChromePath("   ", "/usr/bin/chrome"), "/usr/bin/chrome", "a blank selection is no selection");
-const pathCtx = (section) => ({ get: (name) => (name === "settings" ? { document: { "chrome-mcp": section } } : void 0) });
-assert.equal(readPersistedChromePath(pathCtx({ chromePath: "/home/u/chrome" })), "/home/u/chrome", "persisted selection read");
-assert.equal(readPersistedChromePath(pathCtx({})), "", "absent section field is no selection");
-assert.equal(readPersistedChromePath(pathCtx({ chromePath: 42 })), "", "non-string is ignored");
-assert.equal(readPersistedChromePath(void 0), "", "absent settings service is ignored");
+// The same two layers the flags read against: the user layer answers the
+// selection and the legacy list, the described row is the source of the
+// distinction (before it exists the references stand in alone).
+const pathLayers = (user) => readConfigLayers({}, { ns: "mcp-chrome", user, base: {} });
+assert.equal(readPersistedChromePath(pathLayers({ chromePath: "/home/u/chrome" })), "/home/u/chrome", "persisted selection read");
+assert.equal(readPersistedChromePath(pathLayers({})), "", "absent field is no selection");
+assert.equal(readPersistedChromePath(pathLayers({ chromePath: 42 })), "", "non-string is ignored");
+assert.equal(readPersistedChromePath(readConfigLayers({})), "", "no described row is no selection");
 // ── the saved-executable rows (+ the legacy MRU read) ───────────────────────
 // Nothing writes `chromeCustomPaths` any more — the rows replace it — so the
 // read stays normalization-only: blanks/control characters dropped, duplicates
 // folded, the newest spellings kept up to the cap. A host that still carries the
 // older field folds it into its rows the first time it runs; see apply.test.mjs.
-assert.deepEqual(readPersistedCustomPaths(pathCtx({ chromeCustomPaths: ["/a/chrome", "  ", "/b/chrome"] })), ["/a/chrome", "/b/chrome"], "legacy MRU read, blanks dropped");
+assert.deepEqual(readPersistedCustomPaths(pathLayers({ chromeCustomPaths: ["/a/chrome", "  ", "/b/chrome"] })), ["/a/chrome", "/b/chrome"], "legacy MRU read, blanks dropped");
+assert.deepEqual(readPersistedCustomPaths(readConfigLayers({})), [], "no described row answers the references' own list (empty here)");
 assert.deepEqual(normalizeCustomPaths(["/a/chrome", "/a/chrome", "  "], 10), ["/a/chrome"], "legacy MRU normalized: trimmed, deduped");
 assert.equal(normalizeCustomPaths("x", 10).length, 0, "non-array legacy MRU is empty");
 assert.deepEqual(normalizeCustomPaths(["/a", "/b", "/c", "/d", "/e", "/f", "/g"], 5), ["/a", "/b", "/c", "/d", "/e"], "the newest entries keep the cap");

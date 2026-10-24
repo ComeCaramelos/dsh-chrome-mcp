@@ -5,10 +5,11 @@
  * the running GUI's module table and appear in no local `node_modules` tree (no
  * `@types/*` for them exist), so they are described here — the same
  * structural-view idiom the host half uses for services it does not depend on —
- * rather than imported. `react` and `react/jsx-runtime` are baseline modules
- * that DO have local types (`@types/react` is a devDependency, kept external
- * by `scripts/build-client.mjs`), so those imports resolve normally through
- * `node_modules/@types/react`.
+ * rather than imported. `react`, `react/jsx-runtime` and `react-dom/client`
+ * are baseline modules that DO have local types (`@types/react` and
+ * `@types/react-dom` are devDependencies, kept external by
+ * `scripts/build-client.mjs`), so those imports resolve normally through
+ * `node_modules/@types/*`.
  *
  * Keep the shapes as narrow as what this half actually calls; widening them to
  * match upstream's real surface is a drift risk the tests cannot catch.
@@ -55,4 +56,14 @@ declare module "@deepseek-ai/dsh-client-ui-primitives" {
         disabled?: boolean;
         onChange?: () => void;
     }) => any;
+
+    /**
+     * A transient notice: it portals itself to `document.body` and dismisses on
+     * its own timer. Only `text`/`icon`/`onDone` are used here — widening this
+     * shape is a drift risk the tests cannot catch.
+     */
+    export const Toast: (props: { text: string; icon?: any; onDone?: () => void }) => any;
+
+    /** 16px warning glyph carried inside a toast. */
+    export const IconWarningOutline16: (props?: any) => any;
 }

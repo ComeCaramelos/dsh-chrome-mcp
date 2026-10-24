@@ -14,4 +14,5 @@
  * substituted. See ./scan.ts for the full behaviour and the WSL interop note.
  */
 export { chromeExecutableCandidates, DEFAULT_CHROME_PATHS, defaultChromePaths } from "./candidates.js";
+export { probeExecutable, readWindowsInstallVersion } from "./probe.js";
 export { checkChrome, discoverChrome, scanChromeExecutables } from "./scan.js";

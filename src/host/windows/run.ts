@@ -177,8 +177,9 @@ export async function runWindowsChromeConnect(options: WindowsChromeRunOptions =
     }
     if (!prereqOk) return { state: "unreachable", port: 0, url: "", profileDir: "", error: WINDOWS_CHROME_PREREQ_ERROR };
 
-    // 3. port. A live `--browserUrl` entry already answers: re-check it and
-    // settle on it without a second launch when it still holds.
+    // 3. port. A live connect entry already answers — in every spelling
+    // `flags.ts` accepts, not only the one the run itself writes — so it is
+    // re-checked and settled on without a second launch when it still holds.
     const livePort = browserUrlFlagPort(options.currentFlags);
     if (livePort > 0 && (await reachable("127.0.0.1", livePort))) {
         // The already-live session is profiled in the same per-port directory a
