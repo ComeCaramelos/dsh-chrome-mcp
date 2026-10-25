@@ -10,7 +10,7 @@
     "url": "https://github.com/ComeCaramelos/dsh-chrome-mcp/issues"
   },
   "homepage": "https://github.com/ComeCaramelos/dsh-chrome-mcp#readme",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
