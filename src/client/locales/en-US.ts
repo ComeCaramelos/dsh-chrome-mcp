@@ -10,10 +10,8 @@
  * step is the host seeding a never-configured host once.
  */
 export const en = {
-    title: "DSH Chrome MCP",
-    description: "DSH Chrome MCP server (chrome-devtools-mcp) settings and status",
     executableLabel: "Chrome executable",
-    executableHint: "The saved executable the bridge launches with. Selecting one restarts the connection.",
+    executableHint: "The executable every connection launched from this row launches with, unless the connection picked its own. Changing it answers the live connections again.",
     executableNone: "No Chrome executable detected",
     executableRows: "Saved executables",
     executableIdLabel: "Executable path",
@@ -37,7 +35,7 @@ export const en = {
     unavailableSuffix: "not runnable",
     wslWindowsTitle: "Windows executable under WSL",
     wslWindowsNote:
-        "This host runs inside Windows Subsystem for Linux and the selected executable is the Windows Chrome, which the bridge cannot launch: the debug pipes it opens do not survive the WSL interop boundary, and its debugging port stays bound to the Windows loopback, unreachable over the WSL2 NAT bridge. It answers --version correctly, so the pill looks healthy until the first tool call fails. To drive the Windows browser, start Chrome yourself with --remote-debugging-port=9222 --user-data-dir=C:\\chrome-debug, add --browserUrl=http://127.0.0.1:9222 to the extra flags, and make Windows loopback reachable from WSL by setting networkingMode=mirrored in %USERPROFILE%\\.wslconfig followed by wsl --shutdown. Chrome installed inside the Linux distro needs none of this.",
+        "This host runs inside Windows Subsystem for Linux and the selected executable is the Windows Chrome, which no connection here can launch: the debug pipes it opens do not survive the WSL interop boundary, and its debugging port stays bound to the Windows loopback. It answers --version correctly, so the pill looks healthy until the first tool call fails. Drive it instead with the “Windows Chrome (WSL debug port)” connection, or with its run — Prelaunch Windows Chrome, the action the executable block carries next to Fetch executables, or the prelaunch_windows_chrome tool — which starts the Windows browser on a free debugging port. The run only reads whether Windows loopback reaches this WSL host (networkingMode=mirrored in %USERPROFILE%\\.wslconfig, then wsl --shutdown — a manual Windows-side setting it never edits). Chrome installed inside the Linux distro needs none of this.",
     probing: "Checking the executables…",
     versionLabel: "Probed version:",
     probeJustNow: "just now",
@@ -45,7 +43,7 @@ export const en = {
     probeMinutesAgo: "minutes ago",
     probeHoursAgo: "hours ago",
     flagsTitle: "Extra flags",
-    flagsHint: "The extra flags the bridge launches with. One flag per row — saving restarts the connection.",
+    flagsHint: "The extra flags every connection launched from this row launches with, unless the connection carries its own. One flag per row — applying them answers the live connections again.",
     flagsEmpty: "No extra flags saved. Add one by hand, or use “Restore defaults”.",
     flagsRows: "Saved flags",
     flagsValueLabel: "Extra flag",
@@ -55,25 +53,36 @@ export const en = {
     flagsRestore: "Restore defaults",
     flagsRestoreTitle: "Keep every flag the rows carry and append the defaults that are still missing",
     flagsWsl: "Flags WSL",
-    flagsWslTitle: "Añadir flags recomendados para WSL<->Windows",
+    flagsWslTitle: "Append the recommended WSL<->Windows flags",
     openWindowsChrome: "Prelaunch Windows Chrome",
-    openWindowsChromeTitle: "Lanza el Chrome del lado Windows con --remote-debugging-port y deja el bridge en modo conexión",
-    openWindowsChromeBusy: "Iniciando Chrome de Windows…",
-    windowsChromeNotWsl: "Windows Chrome no aplica fuera de WSL.",
-    windowsChromeNotFound: "No se encontró Chrome en el lado Windows (Program Files / Program Files (x86)).",
+    openWindowsChromeTitle: "Start the Windows-side Chrome with --remote-debugging-port and refresh whatever Windows Chrome connections stand live",
+    openWindowsChromeBusy: "Starting Windows Chrome…",
+    windowsChromeNotWsl: "Windows Chrome does not apply outside WSL.",
+    windowsChromeNotFound: "No Windows Chrome was found (Program Files / Program Files (x86)) — run it again once one is installed.",
     windowsChromeUnreachable:
-        "Requiere networkingMode=mirrored en %USERPROFILE%\\.wslconfig, con wsl --shutdown: hoy el loopback de Windows no es alcanzable desde este host WSL.",
+        "Needs networkingMode=mirrored in %USERPROFILE%\\.wslconfig, with wsl --shutdown: right now this WSL host cannot reach the Windows loopback.",
     connectModeLabel: "Connect mode",
-    connectModeHint: "Modo conexión: el bridge no lanza un Chrome local (conecta con --browserUrl / --wsEndpoint); la selección local queda a la espera.",
+    connectModeHint: "Connect mode: the connection launches no local Chrome (it connects with --browserUrl / --wsEndpoint); the local selection stays put.",
     reduceLabel: "Reduce log output",
-    reduceTitle: "Capture the bridge's stderr into the plugin's log file",
-    reduceHint: "Captures stderr into the plugin's log file. Turn it off to debug the raw bridge output; switching restarts the bridge connection.",
+    reduceTitle: "Capture the connection's stderr into the plugin's log file",
+    reduceHint: "Captures stderr into the plugin's log file. Turn it off to debug the raw output; switching answers the live connections again.",
+    // The staged form's own copy: nothing is written until **Apply** lands every
+    // staged edit, so the card announces what a save would store and what it
+    // could not land.
+    apply: "Apply",
+    discard: "Discard",
+    saving: "Applying…",
+    unsaved: "Unsaved",
+    saveFailed: "The last save was not accepted.",
     docsMessage: "Find the complete list of server parameters (e.g., --headless, --isolated, --slim) and how to configure WebSocket connections in the Configuration Guide.",
     docsLinkLabel: "Configuration Guide",
     statusError: "Error",
     statusOk: "OK",
     chromeMissing: "Chrome executable not found",
-    readOnly: "Settings are read-only in this deployment.",
-    expand: "Expand",
-    collapse: "Collapse"
+    // The body-mounted toast host's copy: it announces what the card's own error
+    // line can only show while the row page is open. An error notice carries the
+    // Host's captured line, so `toastError` only stands behind an empty one.
+    toastStall: "The Chrome host did not answer the action — try it again.",
+    toastError: "The Chrome host reported a failure.",
+    readOnly: "Settings are read-only in this deployment."
 };

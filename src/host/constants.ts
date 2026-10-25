@@ -1,14 +1,21 @@
 /**
  * Host-half fixed identifiers, budgets and validation patterns.
  *
- * The strings are a public contract — the settings namespace is both the
- * persistence key and the Web card's slot key — and the budgets are what the
- * README and the tests quote, so they live here once and every module imports
- * rather than repeats them.
+ * The strings are a public contract — the profile entry id is both the
+ * persistence key and the Web card's configuration-form key — and the budgets
+ * are what the README and the tests quote, so they live here once and every
+ * module imports rather than repeats them.
  */
 
-/** Fixed settings namespace; also the client card's slot key. */
-export const SETTINGS_NAMESPACE = "chrome-mcp";
+/**
+ * The profile entry id the bundle patch inserts (`cordis.patch.yml`), and the
+ * key every read and write of the configuration form goes through. Since dsh
+ * 0.2.0 the card addresses the Host through the **entry id**, not a namespace of
+ * its own, and `serverName` is not part of that identity. The Host reads the
+ * live id off its own fiber (`chromeMcpEntryId`) so a renamed row keeps
+ * working; this constant is what the loud failure and the log lines name.
+ */
+export const ENTRY_ID = "mcp-chrome";
 
 /** Environment variable that seeds the launch flags for one dsh run. */
 export const FLAGS_ENV_VAR = "DSH_CHROME_MCP_FLAGS";
@@ -17,9 +24,23 @@ export const FLAGS_ENV_VAR = "DSH_CHROME_MCP_FLAGS";
  * Flag entries are appended verbatim to the bridge argv and reach Chrome via
  * a direct execve (no shell), so shell metacharacters cannot execute here.
  * What must never reach argv is control characters (newlines, NULs) — they
- * corrupt the argument framing, so entries may not contain any.
+ * corrupt the argument framing, so entries may not contain any. This is the
+ * `extraFlags` field's own pattern: a form write naming a control character is
+ * refused Host-side, by the schema rather than by a `validate` hook.
  */
 export const CONTROL_PATTERN = /[\x00-\x1f\x7f]/u;
+
+/**
+ * One `extraFlags` entry as a form write may land it: non-empty, and no control
+ * character. This is the field's own pattern, so the gate that refuses them is
+ * the **schema**, not a `validate` hook — the write path runs it Host-side, on
+ * every layer (a row config carrying a newline fails to resolve rather than
+ * reaching argv as a corrupt entry). Spaces inside a value stay allowed: a
+ * Windows-style path in a flag value is one argv item, never a shell word (see
+ * ./flags.ts `validateExtraFlags` for what the paths the form never edits —
+ * `DSH_CHROME_MCP_FLAGS`, the row config — still check).
+ */
+export const EXTRA_FLAG_PATTERN = /^(?:[^\x00-\x1f\x7f]+)$/u;
 
 /** Flags every launch carries unless the user overrides them. */
 export const DEFAULT_EXTRA_FLAGS = ["--no-usage-statistics", "--no-performance-crux"];
@@ -55,18 +76,43 @@ export const CONFIGURATION_DOCS_URL =
 export const CHECK_TIMEOUT_MS = 15000;
 
 /**
- * Why a Windows `chrome.exe` on a WSL host is **never probed**. The exec answers
- * successfully — which is what makes the selection look healthy — but answering
- * means *attaching to the Windows browser session*, and that brings a browser
- * instance up (measured on WSL2 + Google Chrome 153: `chrome.exe --version`
- * spawns the browser process plus its crashpad handler). No tool call could
- * ever drive what it started (the debug pipes do not cross the interop
- * boundary), so the probe buys nothing and costs a running browser: the check
- * answers nothing, and the scan keeps the entry visible as `unavailable` with
- * this reason.
+ * What a Windows executable answers when no version folder sits beside it. On
+ * Windows a Chromium browser does not answer `--version`: it opens a window
+ * (or hands one to the instance already running), so it is never spawned to
+ * ask — the version is read off the install's own `<major>.<minor>.<build>.<patch>`
+ * folder instead, and an install without one answers this.
+ */
+export const WINDOWS_VERSION_UNKNOWN = "version unknown";
+
+/**
+ * How long a failed executable run waits before its one bounded retry. The
+ * failure this answers is not "nothing is installed here" — it is a host that
+ * is not ready yet at the moment the run fires (a WSL boot whose interop
+ * mount has not been served yet, a drive not yet mounted). Without the retry
+ * that answer would stand until someone fired the run again by hand.
+ */
+export const DISCOVERY_RETRY_DELAY_MS = 15000;
+
+/** How many retries one run chain may arm. Bounded so a machine with nothing
+ * installed is never probed forever — four passes span a boot window, and the
+ * manual trigger stays the answer beyond it. */
+export const DISCOVERY_RETRY_MAX = 4;
+
+/**
+ * Why a Windows `chrome.exe` on a WSL host is **never probed** — and, since the
+ * Windows executables this host carries *are* offered as candidates, what such a
+ * candidate reads as instead of a failure. The exec answers successfully — which
+ * is what makes the selection look healthy — but answering means *attaching to
+ * the Windows browser session*, and that brings a browser instance up (measured
+ * on WSL2 + Google Chrome 153: `chrome.exe --version` spawns the browser process
+ * plus its crashpad handler). No tool call could ever drive what it started (the
+ * debug pipes do not cross the interop boundary), so the probe buys nothing and
+ * costs a running browser: the check answers nothing, and the scan keeps the
+ * entry visible carrying this reason — as its **note**, never as a failure,
+ * because the **Prelaunch Windows Chrome** run drives it in connect mode.
  */
 export const WSL_WINDOWS_LAUNCH_ERROR =
-    "Windows chrome.exe cannot be launched from WSL — use connect mode (--browserUrl / --wsEndpoint) against a Chrome started with --remote-debugging-port";
+    "Windows chrome.exe cannot be launched from WSL — run Prelaunch Windows Chrome to drive it in connect mode";
 
 /** Max length of a reported error line. */
 export const ERROR_CAP = 240;
@@ -96,18 +142,57 @@ export const STDERR_MODE_FIELD_PATTERN = /^(?:log|console)?$/u;
 export const OPTIONAL_PATH_PATTERN = /^(?:\/[^\x00-\x1f\x7f]*|)$/u;
 
 /**
- * Candidate POSIX shells used only to redirect the bridge's stderr (see
- * ./bridge.ts `buildBridgeSpawn`). None found on a bare Windows host → the
- * redirect is impossible and the spawn stays unwrapped with `fallback:
- * "platform"`/`"shell"`.
+ * The connection kinds this component registers with the manager's
+ * `mcpConnections` service. They are the
+ * component: the row stands up no bridge of its own any more, every live bridge
+ * is one of these connections.
+ *
+ * `chrome` — the local `chrome-devtools-mcp` bridge, what the row used to start
+ * for itself. `chrome-windows` — the Windows browser driven through the WSL
+ * interop mount (the run the **Prelaunch Windows Chrome** button answers with),
+ * async to launch. The ids are the contract with `servers` entries; the labels
+ * are what the picker lists. Neither kind caps its entries and neither carries
+ * a composer pill.
  */
-export const SH_PATH_CANDIDATES = ["/bin/sh", "/usr/bin/sh"] as const;
+export const KIND_ID_CHROME = "chrome";
+export const KIND_ID_WINDOWS = "chrome-windows";
+export const KIND_CHROME_LABEL = "Chrome MCP";
+export const KIND_CHROME_SUMMARY = "Runs `chrome-devtools-mcp` and launches a local Chrome. The executable and the flags are picked on the connection.";
+export const KIND_WINDOWS_LABEL = "Windows Chrome (WSL debug port)";
+export const KIND_WINDOWS_SUMMARY = "Opens the Windows Chrome through the WSL interop mount and connects to its debugging port. WSL only.";
+
+/**
+ * The keys one entry's `extra` carries for these kinds. They are a contract with
+ * the manager's entry editor: what the fields write is exactly what `resolve`
+ * reads back. `extraFlags` is a `lines` field, so its value is one flag per
+ * line joined by newlines (see ./kind.ts `parseFlagLines`).
+ */
+export const KIND_FIELDS = {
+    executable: "executable",
+    extraFlags: "extraFlags",
+    stderrMode: "stderrMode"
+} as const;
+
+/**
+ * Whether the translation of a **standalone** row config has been offered and
+ * turned down. It is a volatile field of this
+ * row — what was refused is this row's configuration, so the dismissal lives
+ * here and nowhere else.
+ */
+export const MIGRATION_DISMISSED_FIELD = "migrationDismissed";
+
+/** One entry's extra flag lines joined the way a `lines` field stores them. */
+export const FLAG_LINE_SEPARATOR = "\n";
+
+/** Why the `chrome-windows` kind refuses an entry off WSL (spec §2: not-applicable). */
+export const NOT_WSL_ERROR =
+    "This host is not a WSL instance: there is no Windows-side browser to drive — use the Chrome MCP kind instead";
 
 /**
  * `chromePath` user layer: a filesystem path or a PATH-resolved name. Nothing
  * travels through a shell here either, so the only hard constraint is that no
  * control character reaches it; the length cap keeps one absurd value out of
- * argv and out of the settings document.
+ * argv and out of the row's own patch layer.
  */
 export const CHROME_PATH_PATTERN = /^[^\x00-\x1f\x7f]{0,4096}$/u;
 
@@ -129,12 +214,13 @@ export const CATALOG_NAME_MAX_LENGTH = 200;
 export const CATALOG_MAX_LENGTH = 50;
 
 /**
- * The Windows-side Chrome/Edge executables the card's **Prelaunch Windows Chrome**
- * button locates through the WSL interop mount. They are NOT local picker
- * candidates — the picker must never offer what cannot be launched from
- * Linux (hard constraint) — the button exists precisely because Windows
- * Chrome is only usable in *connect* mode. The list is host-served logic: the
- * card carries no copy of it.
+ * The Windows-side Chrome/Edge executables this host carries. The
+ * **Prelaunch Windows Chrome** button locates through them, and — on a WSL host
+ * only — the executable run folds the ones this machine actually carries into its
+ * candidate list, so the picker can name the executable the run drives. They are
+ * never *probed* from here (`WSL_WINDOWS_LAUNCH_ERROR`): the run drives them in
+ * *connect* mode, which is the only Windows path ever measured to work. The list
+ * is host-served logic: the card carries no copy of it.
  */
 export const WINDOWS_CHROME_CANDIDATES = [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",

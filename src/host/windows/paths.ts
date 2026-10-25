@@ -18,33 +18,63 @@ import { WINDOWS_CHROME_CANDIDATES, WINDOWS_CHROME_PROFILE_DIRNAME } from "../co
 
 /**
  * The Windows spelling mapped onto the interop mount (`C:\Program Files\…` →
- * `/mnt/c/Program Files/…`), which is the form WSL can stat. A path with no
- * drive letter is not a Windows mount path and yields "".
+ * `/mnt/c/Program Files/…`), which is the form WSL can stat. A path already
+ * spelled as the mount maps to itself — the mount spelling is what the WSL side
+ * can stat and therefore what a saved row or the row config may carry — and a
+ * path that is neither maps nowhere and yields "".
+ *
+ * A path may have been written or copied shell-style, where a space is escaped
+ * (`Program\ Files`). Such a backslash escapes the space that follows it and is
+ * not a separator, so it folds away to the plain space first; every other
+ * backslash is a Windows separator and folds to a slash. Turning one space
+ * escape blindly into a slash produced `Program/ Files` — a path that exists
+ * nowhere and answers `not-found` for a Chrome the run had actually located
+ * (measured live 2026-10-12 against a saved mount-spelled selection).
  */
 export function windowsPathToMount(path: unknown): string {
     if (typeof path !== "string") return "";
-    const candidate = path.trim();
-    const match = candidate.match(/^([a-z]):[\\/](.*)$/iu);
-    if (match === null) return "";
-    return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/gu, "/")}`;
+    const candidate = path.trim().replace(/\\ /gu, " ").replace(/\\/gu, "/");
+    const windows = candidate.match(/^([a-z]):\/(.*)$/iu);
+    if (windows !== null) return `/mnt/${windows[1].toLowerCase()}/${windows[2]}`;
+    const mounted = candidate.match(/^\/mnt\/([a-z])\/(.*)$/iu);
+    if (mounted === null) return "";
+    return `/mnt/${mounted[1].toLowerCase()}/${mounted[2]}`;
 }
 
 /**
- * Locate the Windows-side Chrome through the interop mount: the first
- * candidate whose mount path exists, "" when this machine carries none of
- * them. The returned path keeps its **Windows** spelling — it is what the
- * `start` invocation takes and what the card names.
+ * Locate the Windows-side Chrome through the interop mount: the first candidate
+ * whose mount path exists, "" when this machine carries none of them. The
+ * returned path keeps its **Windows** spelling — it is what the `start`
+ * invocation takes and what the card names.
  */
 export function findWindowsChromeExecutable(
     exists: (path: string) => boolean = (path: string) => existsSync(path),
     candidates: readonly string[] = WINDOWS_CHROME_CANDIDATES
 ): string {
+    return findWindowsChromeExecutables(exists, candidates)[0] ?? "";
+}
+
+/**
+ * Every Windows-side executable this host carries, in the list's own preference
+ * order and in its **Windows** spelling — the whole located set, not only the
+ * first. This is what the executable run folds into its candidate list, so the
+ * picker offers the Windows browser instead of hiding it. A machine that carries
+ * none of them answers nothing, so the list is what is installed here, never a
+ * fixed set of install locations. Nothing on the list is ever spawned from WSL
+ * (see `blockedForPlatform`); it is offered so that the **Prelaunch Windows
+ * Chrome** run can be pointed at the one the picker selected.
+ */
+export function findWindowsChromeExecutables(
+    exists: (path: string) => boolean = (path: string) => existsSync(path),
+    candidates: readonly string[] = WINDOWS_CHROME_CANDIDATES
+): string[] {
+    const found: string[] = [];
     for (const candidate of Array.isArray(candidates) ? candidates : []) {
         const path = typeof candidate === "string" ? candidate.trim() : "";
-        if (path === "") continue;
-        if (exists(windowsPathToMount(path))) return path;
+        if (path === "" || found.includes(path)) continue;
+        if (exists(windowsPathToMount(path))) found.push(path);
     }
-    return "";
+    return found;
 }
 
 /** Cached answer of the Windows-side profile root (`windowsChromeLocalAppData`). */

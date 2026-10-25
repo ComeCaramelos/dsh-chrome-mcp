@@ -1,70 +1,104 @@
 /**
- * Host half — the `chrome-mcp` settings section.
+ * Host half — the configuration form.
  *
- * Installs the namespace the Web GUI card edits and routes every commit into
- * the controller. Two contract details decide the shape of this module:
+ * Since dsh 0.2.0 the card edits the **row configuration** through the profile's
+ * configuration form: one `Config` (./schema.ts), keyed by the row's profile
+ * entry id. So this module no longer installs a namespace — it attaches the row
+ * to the form and routes what the form answers into the controller. Three things
+ * it owns:
  *
- * - `installSection` runs `hooks.onChange()` synchronously at registration,
- *   which is how a persisted `extraFlags` selection lands on the FIRST
- *   connection when the settings service is already up (the cold path is
- *   `readPersistedFlags` in ./values.ts).
- * - The `validate` hook is the UI write gate: an invalid flags list throws
- *   inside `installSection` (surfaced on the card), it never reaches the
- *   running bridge. The executable fields are gated the same way — a path
- *   carrying control characters can never become a selection nor a saved-row
- *   id — and `--executablePath` in the flags list is rejected outright,
- *   because the picker owns that one flag (see ./flags.ts).
+ * - **Identity.** Everything reads and writes by the profile **entry id** read
+ *   off this fiber's own loader entry (`chromeMcpEntryId`). It is not a namespace
+ *   and never derived from `serverName`: two instances would collide on the same
+ *   row, so an instance that is not a profile entry says so loudly rather than
+ *   inventing a key of its own.
+ * - **The auto page stays off.** `settings.configure({ auto: false }, fiber)`
+ *   keeps the Host from standing up a generated page while the card owns the
+ *   row's page — and it is a *disposable* call that throws the second time for
+ *   one fiber, so it rides one fiber effect and disposes with it (verified live,
+ *   .probe/MIGRATION-CONTRACT.md §2e: `auto` only decides the generated page, and
+ *   the entry stays fully described either way).
+ * - **Commit routing.** A form commit lands as a volatile commit on this fiber,
+ *   which the loader reports as `loader/volatile-update` carrying the paths it
+ *   touched. Only the *user-authored* paths mean anything to the running bridge,
+ *   so those are what route — and that same filter is what keeps a live publish
+ *   (which only ever commits live fields) from re-entering the router.
  */
-import { CHROME_PATH_PATTERN, CUSTOM_PATHS_CAP, SETTINGS_NAMESPACE } from "./constants.js";
-import { isValidEntryId } from "./catalog.js";
-import { SettingsSchema } from "./schema.js";
-import { validateExtraFlags } from "./flags.js";
-import { normalizeCustomPaths } from "./values.js";
+import { attachSettingsForm } from "@comecaramelos/dsh-ancesters/host";
+
+import { ENTRY_ID } from "./constants.js";
 import type { ChromeMcpController } from "./controller/index.js";
-import type { PluginContext, SettingsResolved, SettingsService } from "./types/index.js";
+import type { ChromeMcpForm, PluginContext } from "./types/index.js";
+import { liveMirrorKeys } from "./values.js";
+
+/** The fields the card edits. A commit that touches nothing here changes nothing
+ * the running bridge does, which is what keeps a live publish out of the router. */
+const USER_FIELDS = new Set<string>([
+    "extraFlags",
+    "chromePath",
+    "executables",
+    "chromeCustomPaths",
+    "stderrMode",
+    "refreshExecutablesNonce",
+    "openWindowsChromeNonce"
+]);
+
+/** Narrowed loader-entry view: only the one property the id rule reads. */
+interface EntryIdLike {
+    options?: { id?: unknown };
+}
 
 /**
- * Install the settings namespace and wire its hooks into the controller.
+ * The profile entry id this instance is keyed by, read off its own loader entry.
+ * Throws when the plugin was not started as a profile entry: the id is the key
+ * every read and write goes through, so inventing one would alias (or silently
+ * address nothing) instead of failing loud.
  * @param ctx - plugin context.
- * @param controller - the live state created by `apply`.
  */
-export function installChromeMcpSection(ctx: PluginContext, controller: ChromeMcpController): void {
-    ctx.inject(["settings"], (inner: PluginContext) => {
-        const settings = (inner as { settings?: SettingsService }).settings;
-        if (!settings) return;
-        settings.installSection(inner, SETTINGS_NAMESPACE, SettingsSchema, controller.entry, {
-            setSource: (next: () => SettingsResolved) => {
-                controller.setSource(next);
-            },
-            validate: (value: SettingsResolved) => {
-                try {
-                    validateExtraFlags(value.extraFlags);
-                } catch (error) {
-                    const msg = error instanceof Error ? String(error.message ?? error) : String(error);
-                    throw new Error(`settings "${SETTINGS_NAMESPACE}": ${msg}`);
-                }
-                if (value.stderrMode !== "" && value.stderrMode !== "log" && value.stderrMode !== "console") {
-                    throw new Error(`settings "${SETTINGS_NAMESPACE}": stderrMode must be "log", "console" or empty (row-config default)`);
-                }
-                for (const path of [value.chromePath, ...normalizeCustomPaths(value.chromeCustomPaths, CUSTOM_PATHS_CAP)]) {
-                    if (typeof path !== "string" || path === "" || CHROME_PATH_PATTERN.test(path)) continue;
-                    throw new Error(`settings "${SETTINGS_NAMESPACE}": chromePath "${path}" must be a path without control characters`);
-                }
-                // The saved rows go on the wire the same way the selection does,
-                // so the gate that rejects a control-character path rejects a
-                // control-character row id — a bad row never reaches a scan, and
-                // never reaches argv as `--executablePath=<id>`.
-                for (const row of Array.isArray(value.executables) ? value.executables : []) {
-                    const id = row === null || typeof row !== "object" ? "" : (row as { id?: unknown }).id;
-                    if (isValidEntryId(id)) continue;
-                    throw new Error(
-                        `settings "${SETTINGS_NAMESPACE}": executable row "${String(id ?? "")}" must carry a path without control characters`
-                    );
-                }
-            },
-            onChange: () => {
-                controller.onSettingsChange();
-            }
-        });
+export function chromeMcpEntryId(ctx: PluginContext): string {
+    const fiber = ctx.fiber as unknown as { entry?: EntryIdLike } | undefined;
+    const id = fiber?.entry?.options?.id;
+    if (typeof id !== "string" || id === "") {
+        throw new Error(
+            `dsh-chrome-mcp: this instance is not a profile entry, so the configuration form has no entry id to address it by ` +
+                `(the bundle patch inserts \`id: "${ENTRY_ID}"\` — a bare ctx.plugin() mount has no form)`
+        );
+    }
+    return id;
+}
+
+/**
+ * Attach the row's configuration form to one controller: resolve the entry id,
+ * keep the auto page off, and route the commits the form produces.
+ *
+ * Registration rides one fiber effect for the same reason `tool.ts` registers
+ * lazily: the disposer has to leave with the instance, and an HMR reload must not
+ * leave a prior instance still configuring (the second `configure` for one fiber
+ * throws). A host that is not a profile entry gets a loud error and no form; its
+ * row config keeps driving the bridge exactly as a row-only config always did.
+ * @param ctx - plugin context.
+ * @param controller - the live state the form drives.
+ */
+export function installChromeMcpForm(ctx: PluginContext, controller: ChromeMcpController): void {
+    // The mechanics — the entry id read off this fiber (loud when it is not a
+    // profile entry), the generated page kept off once per fiber and disposed
+    // with it, and the commit filter on `loader/volatile-update` — are
+    // ancestros' `attachSettingsForm`. A commit naming a **user** field routes
+    // (flags, the executable, the saved rows, the toggle, the two triggers); a
+    // commit naming only **live** fields routes nothing. The mirror's own
+    // re-assert after a reset is the live mirror's business (./controller/
+    // publish.ts), not this router's.
+    attachSettingsForm(ctx as never, {
+        name: `dsh-chrome-mcp(${controller.config.serverName})`,
+        userFields: [...USER_FIELDS],
+        liveKeys: liveMirrorKeys(),
+        onAttach: (form) => controller.attachForm(form as unknown as ChromeMcpForm),
+        onDetach: () => controller.detachForm(),
+        onCommit: () => controller.onFormCommit()
     });
 }
+
+/** Every live-only key a Host write-back clears from the stored row (exported
+ * here for the tests and for the write paths that carry the `unset` ops — the
+ * same shape the reference's `settings.ts` keeps). */
+export const LIVE_MIRROR_KEYS = liveMirrorKeys();

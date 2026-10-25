@@ -1,0 +1,6 @@
+{
+    "meta": {
+        "title": "Chrome MCP",
+        "description": "将 chrome-devtools-mcp 作为 MCP 连接运行——本地 Chrome 浏览器，或经 WSL 驱动 Windows 侧 Chrome——并在其上提供可执行文件选择器。"
+    }
+}

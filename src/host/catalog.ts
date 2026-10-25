@@ -42,8 +42,8 @@ export function entryLabel(entry: ChromeExecutableEntry): string {
 /**
  * Coerce anything into well-formed rows: trim both fields, drop ids that cannot
  * go on the wire, keep the first row per id, cap the name, cap the list (the
- * tail drops off). A served array is already normalized; one read straight from
- * a settings document is not, so the row writer is the place that makes it safe.
+ * tail drops off). A served array is already normalized; one read straight from a
+ * form write is not, so the row writer is the place that makes it safe.
  */
 export function normalizeEntries(value: unknown): ChromeExecutableEntry[] {
     if (!Array.isArray(value)) return [];

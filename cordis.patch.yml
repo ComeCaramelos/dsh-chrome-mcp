@@ -1,5 +1,0 @@
-- insert:
-    - id: mcp-chrome
-      name: '@comecaramelos/dsh-chrome-mcp'
-      config:
-        serverName: chrome

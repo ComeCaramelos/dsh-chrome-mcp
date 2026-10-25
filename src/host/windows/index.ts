@@ -24,6 +24,7 @@
  */
 export {
     findWindowsChromeExecutable,
+    findWindowsChromeExecutables,
     windowsChromeLocalAppData,
     windowsChromeProfileDir,
     windowsChromeProjectDir,

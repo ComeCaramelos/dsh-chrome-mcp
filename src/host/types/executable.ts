@@ -15,14 +15,19 @@ export type ChromeExecutableEntry = { id: string; name: string };
 
 /**
  * What one saved row answered with, keyed by its id: the `--version` line
- * (`""` when the probe answered nothing) and the failure that makes the row not
- * runnable (`""` when it runs). Base-layer status, never persisted — the row
- * itself lives in the user layer.
+ * (`""` when the probe answered nothing), the failure that makes the row not
+ * runnable (`""` when it runs), and the **note** that explains an executable
+ * this host offers without probing it. A note is not a failure: the path is
+ * there and usable, only not launchable *as a local executable* from here — the
+ * one case is a Windows `chrome.exe` on a WSL host, which the **Prelaunch
+ * Windows Chrome** run drives in connect mode. Base-layer status, never
+ * persisted — the rows themselves live in the user layer.
  */
 export type ChromeExecutableStatus = {
     path: string;
     version: string;
     error: string;
+    note: string;
 };
 
 /** Where the effective executable came from (`effectiveSource`). */

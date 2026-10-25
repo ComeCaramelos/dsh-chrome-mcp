@@ -25,7 +25,8 @@ lib/
 .npm-cache/
 
 # Docs
-docs/
+docs/*
+!docs/knowledge/
 
 # Logs
 *.log

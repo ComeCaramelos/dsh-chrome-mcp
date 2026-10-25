@@ -4,18 +4,18 @@
  * Everything the widget renders but does not own: the saved executable rows
  * (run through the same id rules the rows follow), the dropdown options the pill
  * lists, the ids the last run could not launch, the effective stderr mode
- * behind the toggle, and the header status dot. Pure derivation, no hooks — the
- * widget owns its state, this section reads it.
+ * behind the toggle, and the error line's status dot. Pure derivation, no hooks —
+ * the widget owns its state, this section reads it.
  *
  * The reference card (`dsh-docker-desktop-mcp`) carries the same shape here; the
  * difference is `brokenIds`, which the host's per-path probe answer feeds.
  */
 import { entryLabel, normalizeEntries, type CatalogEntry } from "../catalog.js";
-import type { ChromeExecutableStatus, WindowsChromeStatus } from "../controller/index.js";
+import type { ChromeExecutableStatus, WindowsChromeStatus } from "../types.js";
 
 /** What the card renders, derived from the served snapshot. */
 export type CardView = {
-    /** The error line the header dot and the body paragraph report. */
+    /** The error the body's status line carries ("" = nothing to report). */
     error: string;
     /** Whether the "Reduce log output" switch reads as on. */
     reduceChecked: boolean;
@@ -80,8 +80,28 @@ export function describeCard(state: any): CardView {
         dotIsError: error !== "",
         wslWindowsExecutable: state.wslWindowsExecutable === true,
         windowsChrome: readWindowsChrome(state.windowsChromeStatus),
-        connectMode: state.carriesConnectionMode === true
+        // Connect mode reads two ways. The mirror's answer is what the Host says
+        // the bridge launches with — authoritative when it has been answered. And
+        // the same question answered off the **saved flags**, which is what the
+        // bridge launches with by the same precedence the flags rows edit: a flag
+        // entry is a real config field a write-back never clears, so it keeps the
+        // answer standing through the reset window every write pass leaves behind
+        // (the same rule the pill's saved-path fallback follows). Either half
+        // answering is enough; neither can contradict what the other states,
+        // because both are asked of the same launch.
+        connectMode: state.carriesConnectionMode === true || flagsCarryConnectionMode(state.extraFlags)
     };
+}
+
+/** The Host's connect-flag shape, restated here because the client reads no host
+ *  module (`src/host/flags.ts`'s `carriesConnectionMode`, the same predicate the
+ *  probe skip keys on); `test/client.test.mjs` pins the two spellings against one
+ *  flag list. */
+const CONNECT_FLAG_PATTERN = /^--(?:browserUrl|wsEndpoint)(?:=|(?=\s)|$)/iu;
+
+/** A connect-mode entry among the saved extra flags. */
+function flagsCarryConnectionMode(flags: unknown): boolean {
+    return Array.isArray(flags) && flags.some((flag) => typeof flag === "string" && CONNECT_FLAG_PATTERN.test(flag));
 }
 
 /** One row's menu label: its display name — the tag a broken row carries is
@@ -119,8 +139,16 @@ export function windowsChromeButton(view: CardView): WindowsButton {
     const status = view.windowsChrome;
     if (status.state === "launching") return { labelKey: "openWindowsChromeBusy", titleKey: "openWindowsChromeTitle", disabled: true, busy: true };
     if (status.state === "not-applicable") return { labelKey: "openWindowsChrome", titleKey: "windowsChromeNotWsl", disabled: true, busy: false };
-    if (status.state === "not-found") return { labelKey: "openWindowsChrome", titleKey: "windowsChromeNotFound", disabled: true, busy: false };
-    if (status.state === "unreachable") return { labelKey: "openWindowsChrome", titleKey: "windowsChromeUnreachable", disabled: true, busy: false };
+    // `off`, `connected`, `launch-failed`, `not-found` and `unreachable` are all
+    // idle answers: the button stays available so the run can be retried. A
+    // `not-found` is an answer about *this* run — the executable the run looked
+    // for may well be there next time (and, with the Windows executables folded
+    // into the candidate list, the selection may change) — and `unreachable` is
+    // the same question about the Windows side; a disabled button would be a
+    // dead end the notice keeps pointing the user back to, and nothing else ever
+    // puts the state back.
+    if (status.state === "not-found") return { labelKey: "openWindowsChrome", titleKey: "windowsChromeNotFound", disabled: false, busy: false };
+    if (status.state === "unreachable") return { labelKey: "openWindowsChrome", titleKey: "windowsChromeUnreachable", disabled: false, busy: false };
     // `off`, `connected` and `launch-failed` are all idle answers: the button
     // stays available so the run can be re-tried or re-adjusted.
     return { labelKey: "openWindowsChrome", titleKey: "openWindowsChromeTitle", disabled: false, busy: false };
